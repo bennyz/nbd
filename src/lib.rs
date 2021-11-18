@@ -1,25 +1,32 @@
 use consts::{
-    NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE, NBD_FLAG_NO_ZEROES,
+    NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
+    NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC,
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::Debug;
+use std::fmt::{write, Debug};
+use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::rc::Rc;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::consts::NBD_OPTS_MAGIC;
+use crate::consts::{NbdOpt, NBD_OPTS_MAGIC};
 
 pub mod consts;
+
+const EMPTY_REPLY: &[u8; 0] = b"";
 
 #[derive(Debug)]
 pub struct Server<T: Read + Write + Debug> {
     clients: Rc<RefCell<HashMap<String, T>>>,
 }
 
-impl<T: Read + Write + Debug> Server<T> {
+impl<T> Server<T>
+where
+    T: Read + Write + Debug,
+{
     pub fn new() -> Self {
         let clients = Rc::new(RefCell::new(HashMap::new()));
         Server { clients }
@@ -55,7 +62,7 @@ impl<T: Read + Write + Debug> Server<T> {
             println!("Checking opts magic: {:#02x}", client_magic);
             if client_magic != NBD_OPTS_MAGIC {
                 eprintln!("Bad magic received {:#02x}", client_magic);
-                panic!("Bad magic received");
+                continue;
             }
 
             // Read option
@@ -64,10 +71,30 @@ impl<T: Read + Write + Debug> Server<T> {
 
             // Read option length
             let option_length = c.read_u32::<BigEndian>()?;
-            println!("Received option length {:#02x}", option_length);
-        }
+            println!("Received option length {}", option_length);
 
-        Ok(())
+            // TODO: Remove later
+            let option: NbdOpt = unsafe { transmute(option) };
+
+            match option {
+                NbdOpt::ExportName => {
+                    println!("export name!");
+                }
+                NbdOpt::List => {
+                    let name = b"\x00\x00\x00\x07name123".to_vec();
+                    let description = b"description".to_vec();
+                    let payload = [name, description].concat();
+
+                    reply(c, option, NbdReply::Server, &payload)?;
+                    reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
+                }
+                NbdOpt::Abort => {}
+                _ => {
+                    println!("Aborting");
+                    reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
+                }
+            }
+        }
     }
 
     pub fn add_connection(&mut self, client_addr: String, stream: T) -> Result<(), Box<dyn Error>> {
@@ -75,4 +102,20 @@ impl<T: Read + Write + Debug> Server<T> {
 
         Ok(())
     }
+}
+
+fn reply<T: Read + Write + Debug>(
+    client: &mut T,
+    client_option: NbdOpt,
+    reply_type: NbdReply,
+    data: &[u8],
+) -> Result<(), Box<dyn Error>> {
+    client.write_u64::<BigEndian>(NBD_REP_MAGIC)?;
+    client.write_u32::<BigEndian>(client_option as u32)?;
+    client.write_u32::<BigEndian>(reply_type as u32)?;
+    client.write_u32::<BigEndian>(data.len() as u32)?;
+    client.write_all(data)?;
+    client.flush()?;
+    println!("reply: {:?}, len {}", data, data.len());
+    Ok(())
 }

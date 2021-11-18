@@ -1,6 +1,5 @@
-use std::net::{TcpListener, TcpStream};
-
 use nbd::{self, Server};
+use std::net::{TcpListener, TcpStream};
 
 fn main() {
     let listener =
@@ -10,9 +9,13 @@ fn main() {
         match conn {
             Ok(stream) => {
                 let client = stream.peer_addr().unwrap().to_string();
-                println!("Incoming connection from: {}", &client);
-                server.add_connection(client.to_owned(), stream).unwrap();
-                server.negotiate(&client).unwrap();
+                server
+                    .add_connection(client.to_owned(), stream.try_clone().unwrap())
+                    .unwrap();
+                if let Err(e) = server.negotiate(&client) {
+                    println!("Encountered error, shutting down stream: {}", e);
+                    stream.shutdown(std::net::Shutdown::Both).unwrap();
+                }
             }
             Err(e) => {
                 eprintln!("error: {}", e)
