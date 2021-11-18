@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-use crate::consts::{NbdOpt, NBD_OPTS_MAGIC};
+use crate::consts::{NbdOpt, NBD_INIT_MAGIC, NBD_OPTS_MAGIC};
 
 pub mod consts;
 
@@ -36,10 +36,10 @@ where
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();
         // 64 bits
-        c.write_all(b"NBDMAGIC")?;
+        c.write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
 
         // 64 bits
-        c.write_all(b"IHAVEOPT")?;
+        c.write_all(&NBD_OPTS_MAGIC.to_be_bytes())?;
 
         // 16 bits
         let handshake_flags = NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES;
@@ -116,6 +116,6 @@ fn reply<T: Read + Write + Debug>(
     client.write_u32::<BigEndian>(data.len() as u32)?;
     client.write_all(data)?;
     client.flush()?;
-    println!("reply: {:?}, len {}", data, data.len());
+
     Ok(())
 }

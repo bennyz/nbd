@@ -5,6 +5,7 @@ pub const NBD_FLAG_NO_ZEROES: u16 = 1 << 1;
 pub const NBD_FLAG_C_FIXED_NEWSTYLE: u32 = 1;
 pub const NBD_FLAG_C_NO_ZEROES: u32 = 1 << 1;
 
+pub const NBD_INIT_MAGIC: u64 = 0x4e42444d41474943;
 pub const NBD_OPTS_MAGIC: u64 = 0x49484156454F5054;
 pub const NBD_REP_MAGIC: u64 = 0x3e889045565a9;
 
