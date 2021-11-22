@@ -9,6 +9,9 @@ pub const NBD_INIT_MAGIC: u64 = 0x4e42444d41474943;
 pub const NBD_OPTS_MAGIC: u64 = 0x49484156454F5054;
 pub const NBD_REP_MAGIC: u64 = 0x3e889045565a9;
 
+// Reply errors
+pub const NBD_REP_FLAG_ERROR: u32 = 1 << 31;
+
 #[repr(u32)]
 pub enum NbdCmd {
     Read,
@@ -41,4 +44,7 @@ pub enum NbdReply {
     Server = 2,
     Info = 3,
     MetaContext = 4,
+
+    // Errors
+    NbdRepErrUnsup = 1 | NBD_REP_FLAG_ERROR,
 }

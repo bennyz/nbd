@@ -88,13 +88,32 @@ where
                     reply(c, option, NbdReply::Server, &payload)?;
                     reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
                 }
-                NbdOpt::Abort => {}
-                _ => {
+                NbdOpt::Abort => {
                     println!("Aborting");
                     reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
                 }
+                NbdOpt::StructuredReply => {
+                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                }
+                NbdOpt::Info => {
+                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                }
+                NbdOpt::Go => {
+                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                }
+                NbdOpt::ListMetaContext => {
+                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                }
+                NbdOpt::SetMetaContext => {
+                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                }
+                NbdOpt::StartTls => {
+                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                }
             }
         }
+
+        Ok(())
     }
 
     pub fn add_connection(&mut self, client_addr: String, stream: T) -> Result<(), Box<dyn Error>> {
