@@ -2,14 +2,16 @@ use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
     NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC,
 };
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{write, Debug};
+use std::fmt::Debug;
 use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::rc::Rc;
 
+use bincode::config::Configuration;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 use crate::consts::{NbdOpt, NBD_INIT_MAGIC, NBD_OPTS_MAGIC};
@@ -21,6 +23,15 @@ const EMPTY_REPLY: &[u8; 0] = b"";
 #[derive(Debug)]
 pub struct Server<T: Read + Write + Debug> {
     clients: Rc<RefCell<HashMap<String, T>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
+#[repr(C)]
+struct OptionReply {
+    magic: [u8; 8],
+    option: [u8; 4],
+    reply_type: [u8; 4],
+    length: [u8; 4],
 }
 
 impl<T> Server<T>
@@ -81,34 +92,30 @@ where
                     println!("export name!");
                 }
                 NbdOpt::List => {
-                    let name = b"\x00\x00\x00\x07name123".to_vec();
-                    let description = b"description".to_vec();
-                    let payload = [name, description].concat();
-
-                    reply(c, option, NbdReply::Server, &payload)?;
-                    reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
+                    Self::handle_list(c, "kawabanga", "babanaga")?;
                 }
                 NbdOpt::Abort => {
                     println!("Aborting");
-                    reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::Ack, EMPTY_REPLY)?;
+                    break;
                 }
                 NbdOpt::StructuredReply => {
-                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::Info => {
-                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::Go => {
-                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::ListMetaContext => {
-                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::SetMetaContext => {
-                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::StartTls => {
-                    reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
             }
         }
@@ -121,20 +128,51 @@ where
 
         Ok(())
     }
-}
 
-fn reply<T: Read + Write + Debug>(
-    client: &mut T,
-    client_option: NbdOpt,
-    reply_type: NbdReply,
-    data: &[u8],
-) -> Result<(), Box<dyn Error>> {
-    client.write_u64::<BigEndian>(NBD_REP_MAGIC)?;
-    client.write_u32::<BigEndian>(client_option as u32)?;
-    client.write_u32::<BigEndian>(reply_type as u32)?;
-    client.write_u32::<BigEndian>(data.len() as u32)?;
-    client.write_all(data)?;
-    client.flush()?;
+    // TODO: support multiple (and actual) exports
+    fn handle_list(client: &mut T, name: &str, description: &str) -> Result<(), Box<dyn Error>> {
+        let reply_header = OptionReply {
+            magic: NBD_REP_MAGIC.to_be_bytes(),
+            option: (NbdOpt::List as u32).to_be_bytes(),
+            reply_type: (NbdReply::Server as u32).to_be_bytes(),
+            length: (name.len() as u32 + description.len() as u32 + 4).to_be_bytes(),
+        };
 
-    Ok(())
+        Self::header_reply(client, reply_header)?;
+        client.write_all(&(name.len() as u32).to_be_bytes())?;
+        client.write_all(name.as_bytes())?;
+        client.write_all(description.as_bytes())?;
+        client.flush()?;
+
+        Self::reply(client, NbdOpt::List, NbdReply::Ack, EMPTY_REPLY)?;
+
+        Ok(())
+    }
+
+    fn header_reply(client: &mut T, header: OptionReply) -> Result<(), Box<dyn Error>> {
+        let config = Configuration::standard();
+        config.with_big_endian();
+        config.with_variable_int_encoding();
+        let serialized = bincode::encode_to_vec(&header, config)?;
+        client.write_all(&serialized)?;
+        client.flush()?;
+
+        Ok(())
+    }
+
+    fn reply(
+        client: &mut T,
+        client_option: NbdOpt,
+        reply_type: NbdReply,
+        data: &[u8],
+    ) -> Result<(), Box<dyn Error>> {
+        client.write_u64::<BigEndian>(NBD_REP_MAGIC)?;
+        client.write_u32::<BigEndian>(client_option as u32)?;
+        client.write_u32::<BigEndian>(reply_type as u32)?;
+        client.write_u32::<BigEndian>(data.len() as u32)?;
+        client.write_all(data)?;
+        client.flush()?;
+
+        Ok(())
+    }
 }

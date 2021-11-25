@@ -25,7 +25,7 @@ pub enum NbdCmd {
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NbdOpt {
     ExportName = 1,
     Abort = 2,
@@ -39,6 +39,7 @@ pub enum NbdOpt {
 }
 
 #[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum NbdReply {
     Ack = 1,
     Server = 2,
