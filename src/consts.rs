@@ -12,6 +12,11 @@ pub const NBD_REP_MAGIC: u64 = 0x3e889045565a9;
 // Reply errors
 pub const NBD_REP_FLAG_ERROR: u32 = 1 << 31;
 
+// Custom
+pub const MIN_BLOCK_SIZE: u32 = 1;
+pub const PREFERRED_BLOCK_SIZE: u32 = 4096;
+pub const MAX_BLOCK_SIZE: u32 = 1 << 31;
+
 #[repr(u32)]
 pub enum NbdCmd {
     Read,
@@ -27,6 +32,7 @@ pub enum NbdCmd {
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NbdOpt {
+    Export = 0,
     ExportName = 1,
     Abort = 2,
     List = 3,
@@ -48,4 +54,30 @@ pub enum NbdReply {
 
     // Errors
     NbdRepErrUnsup = 1 | NBD_REP_FLAG_ERROR,
+}
+
+#[repr(u16)]
+#[derive(Debug, Clone, Copy)]
+pub enum NbdInfoOpt {
+    Export = 0,
+    Name = 1,
+    Description = 2,
+    BlockSize = 3,
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NbdFlags {
+    HasFlags = 0,
+    ReadOnly = 1,
+    SendFlush = 2,
+    SendFua = 3,
+    RotationalBit = 4,
+    SendTrim = 5,
+    SendWriteZeroes = 6,
+    SendDf = 7,
+    CanMultiConn = 8,
+    SendResize = 9,
+    SendCache = 10,
+    SendFastZero = 11,
 }
