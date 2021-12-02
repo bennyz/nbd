@@ -36,12 +36,12 @@ pub enum NbdOpt {
     ExportName = 1,
     Abort = 2,
     List = 3,
-    StartTls = 4,
-    Info = 5,
-    Go = 6,
-    StructuredReply = 7,
-    ListMetaContext = 8,
-    SetMetaContext = 9,
+    StartTls = 5,
+    Info = 6,
+    Go = 7,
+    StructuredReply = 8,
+    ListMetaContext = 9,
+    SetMetaContext = 10,
 }
 
 #[repr(u32)]
@@ -63,6 +63,7 @@ pub enum NbdInfoOpt {
     Name = 1,
     Description = 2,
     BlockSize = 3,
+    Unknown = 4,
 }
 
 #[repr(u32)]

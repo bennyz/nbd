@@ -1,4 +1,4 @@
-use bincode::config::Configuration;
+use bincode::config::{Config, Configuration};
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
@@ -115,7 +115,10 @@ where
             let client_magic = c.read_u64::<BigEndian>()?;
             println!("Checking opts magic: {:#02x}", client_magic);
             if client_magic != NBD_OPTS_MAGIC {
-                eprintln!("Bad magic received {:#02x}", client_magic);
+                eprintln!(
+                    "Bad magic received {:#02x}, expected {:#02x}",
+                    client_magic, NBD_OPTS_MAGIC
+                );
                 continue;
             }
 
@@ -150,9 +153,10 @@ where
                 }
                 NbdOpt::Info => {
                     println!("received info!");
-                    Self::reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    self.handle_export_info(c)?;
                 }
                 NbdOpt::Go => {
+                    println!("received go!");
                     self.handle_export_info(c)?;
                 }
                 NbdOpt::ListMetaContext => {
@@ -195,11 +199,10 @@ where
         let mut send_description = false;
         let mut send_block_size = false;
 
-        let mut option: u16 = 0;
+        let mut option = NbdInfoOpt::Unknown;
         for i in 0..requests {
-            option = client.read_u16::<BigEndian>()?;
-            println!("Request {}/{}, option {}", i + 1, requests, option);
-            let option: NbdInfoOpt = unsafe { transmute(option) };
+            option = unsafe { transmute(client.read_u16::<BigEndian>()?) };
+            println!("Request {}/{}, option {:?}", i + 1, requests, option);
 
             // TODO use proper safe conversion
 
@@ -217,23 +220,32 @@ where
                     println!("block size requested");
                     send_block_size = true;
                 }
+                NbdInfoOpt::Unknown => {
+                    panic!("Shouldn't happen");
+                }
             }
         }
 
         if send_name {
-            Self::info_reply(client, NbdInfoOpt::Name, self.export.name.as_bytes())?;
+            Self::info_reply(
+                client,
+                NbdInfoOpt::Name,
+                self.export.name.len() as u32,
+                self.export.name.as_bytes(),
+            )?;
         }
 
         if send_description {
             Self::info_reply(
                 client,
                 NbdInfoOpt::Description,
+                self.export.description.len() as u32,
                 self.export.description.as_bytes(),
             )?;
         }
 
         if send_block_size {
-            let sizes: [u32; 3] = [
+            let sizes: Vec<u32> = vec![
                 MIN_BLOCK_SIZE,
                 PREFERRED_BLOCK_SIZE,
                 std::cmp::min(self.export.size as u32, MAX_BLOCK_SIZE),
@@ -243,7 +255,11 @@ where
             Self::info_reply(
                 client,
                 NbdInfoOpt::BlockSize,
-                &bincode::encode_to_vec(sizes, Configuration::standard())?,
+                14,
+                &sizes
+                    .iter()
+                    .flat_map(|x| x.to_be_bytes())
+                    .collect::<Vec<u8>>(),
             )?;
 
             let mut flags: u16 = 0;
@@ -254,14 +270,17 @@ where
             flags |= self.export.trim as u16;
             flags |= self.export.flush as u16;
 
-            let export_info: Vec<u32> = vec![self.export.size as u32, flags.into()];
-
             println!("Sending export '{}' information", self.export.name);
             Self::info_reply(
                 client,
                 NbdInfoOpt::Export,
-                &bincode::encode_to_vec(export_info, Configuration::standard())?,
+                size_of::<u16>() as u32 + size_of::<u64>() as u32,
+                EMPTY_REPLY,
             )?;
+
+            client.write_all(&self.export.size.to_be_bytes())?;
+            client.write_all(&flags.to_be_bytes())?;
+            client.flush()?;
         }
 
         Ok(())
@@ -289,15 +308,30 @@ where
         Ok(())
     }
 
-    fn info_reply(client: &mut T, option: NbdInfoOpt, data: &[u8]) -> Result<(), Box<dyn Error>> {
-        // Send info option
-        client.write_u16::<BigEndian>(data.len() as u16 + 2)?;
-        client.write_u16::<BigEndian>(size_of::<NbdInfoOpt>() as u16)?;
-        client.write_u16::<BigEndian>(option as u16)?;
+    fn info_reply(
+        client: &mut T,
+        info_type: NbdInfoOpt,
+        len: u32,
+        data: &[u8],
+    ) -> Result<(), Box<dyn Error>> {
+        let header = OptionReply {
+            magic: NBD_REP_MAGIC.to_be_bytes(),
+            option: (NbdOpt::Info as u32).to_be_bytes(),
+            reply_type: (NbdReply::Info as u32).to_be_bytes(),
+            length: len.to_be_bytes(),
+        };
+
+        client.write_all(&bincode::encode_to_vec(
+            &header,
+            Configuration::standard().with_big_endian(),
+        )?)?;
+        client.write_u16::<BigEndian>(info_type as u16)?;
 
         // Send payload
-        dbg!(data);
-        client.write_all(data)?;
+        if data != EMPTY_REPLY {
+            dbg!(data);
+            client.write_all(data)?;
+        }
         client.flush()?;
 
         Ok(())
