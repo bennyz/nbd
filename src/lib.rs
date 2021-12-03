@@ -1,4 +1,4 @@
-use bincode::config::{Config, Configuration};
+use bincode::config::Configuration;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
@@ -12,7 +12,6 @@ use std::fmt::Debug;
 use std::fs;
 use std::intrinsics::transmute;
 use std::io::{Read, Write};
-use std::mem::size_of;
 use std::os::unix::prelude::MetadataExt;
 use std::path::Path;
 use std::rc::Rc;
@@ -199,9 +198,8 @@ where
         let mut send_description = false;
         let mut send_block_size = false;
 
-        let mut option = NbdInfoOpt::Unknown;
         for i in 0..requests {
-            option = unsafe { transmute(client.read_u16::<BigEndian>()?) };
+            let option = unsafe { transmute(client.read_u16::<BigEndian>()?) };
             println!("Request {}/{}, option {:?}", i + 1, requests, option);
 
             // TODO use proper safe conversion
@@ -274,7 +272,7 @@ where
             Self::info_reply(
                 client,
                 NbdInfoOpt::Export,
-                size_of::<u16>() as u32 + size_of::<u64>() as u32,
+                12,
                 EMPTY_REPLY,
             )?;
 
@@ -282,6 +280,8 @@ where
             client.write_all(&flags.to_be_bytes())?;
             client.flush()?;
         }
+
+        Self::reply(client, NbdOpt::Info, NbdReply::Ack, EMPTY_REPLY)?;
 
         Ok(())
     }
