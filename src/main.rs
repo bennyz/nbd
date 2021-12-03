@@ -22,6 +22,7 @@ fn main() {
         name: opts.name,
         description: opts.description,
         path: opts.file,
+        read_only: true,
         ..Default::default()
     };
 

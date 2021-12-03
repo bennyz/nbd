@@ -2,7 +2,7 @@ use bincode::config::Configuration;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
-    NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC,
+    NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC,
 };
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -51,15 +51,6 @@ impl Export {
         let path = Path::new(&self.path);
         let md = fs::metadata(path)?;
         self.size = md.size();
-
-        // TODO: This should be configuarable
-        self.read_only = true;
-
-        self.can_resize = false;
-        self.fast_zero = false;
-        self.trim = false;
-        self.flush = false;
-        self.rotational = false;
 
         Ok(())
     }
@@ -261,20 +252,13 @@ where
             )?;
 
             let mut flags: u16 = 0;
-            flags |= self.export.read_only as u16;
-            flags |= self.export.can_resize as u16;
-            flags |= self.export.fast_zero as u16;
-            flags |= self.export.rotational as u16;
-            flags |= self.export.trim as u16;
-            flags |= self.export.flush as u16;
+            set_flags(&self.export, &mut flags);
 
-            println!("Sending export '{}' information", self.export.name);
-            Self::info_reply(
-                client,
-                NbdInfoOpt::Export,
-                12,
-                EMPTY_REPLY,
-            )?;
+            println!(
+                "Sending export '{}' information, flags {}",
+                self.export.name, flags
+            );
+            Self::info_reply(client, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
 
             client.write_all(&self.export.size.to_be_bytes())?;
             client.write_all(&flags.to_be_bytes())?;
@@ -363,5 +347,27 @@ where
         client.flush()?;
 
         Ok(())
+    }
+}
+
+fn set_flags(export: &Export, flags: &mut u16) {
+    *flags |= NBD_FLAG_HAS_FLAGS;
+    if export.read_only {
+        *flags |= consts::NBD_FLAG_READ_ONLY;
+    }
+    if export.can_resize {
+        *flags |= consts::NBD_FLAG_SEND_FLUSH;
+    }
+    if export.fast_zero {
+        *flags |= consts::NBD_FLAG_SEND_FAST_ZERO;
+    }
+    if export.rotational {
+        *flags |= consts::NBD_FLAG_ROTATIONAL;
+    }
+    if export.trim {
+        *flags |= consts::NBD_FLAG_SEND_TRIM;
+    }
+    if export.flush {
+        *flags |= consts::NBD_FLAG_SEND_FLUSH;
     }
 }

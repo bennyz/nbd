@@ -17,6 +17,20 @@ pub const MIN_BLOCK_SIZE: u32 = 1;
 pub const PREFERRED_BLOCK_SIZE: u32 = 4096;
 pub const MAX_BLOCK_SIZE: u32 = 1 << 31;
 
+// Flags https://github.com/NetworkBlockDevice/nbd/blob/master/doc/proto.md#transmission-flags
+pub const NBD_FLAG_HAS_FLAGS: u16 = 1 << 0;
+pub const NBD_FLAG_READ_ONLY: u16 = 1 << 1;
+pub const NBD_FLAG_SEND_FLUSH: u16 = 1 << 2;
+pub const NBD_FLAG_SEND_FUA: u16 = 1 << 3;
+pub const NBD_FLAG_ROTATIONAL: u16 = 1 << 4;
+pub const NBD_FLAG_SEND_TRIM: u16 = 1 << 5;
+pub const NBD_FLAG_SEND_WRITE_ZEROES: u16 = 1 << 6;
+pub const NBD_FLAG_SEND_DF: u16 = 1 << 7;
+pub const NBD_FLAG_CAN_MULTI_CONN: u16 = 1 << 8;
+pub const NBD_FLAG_SEND_RESIZE: u16 = 1 << 9;
+pub const NBD_FLAG_SEND_CACHE: u16 = 1 << 10;
+pub const NBD_FLAG_SEND_FAST_ZERO: u16 = 1 << 11;
+
 #[repr(u32)]
 pub enum NbdCmd {
     Read,
