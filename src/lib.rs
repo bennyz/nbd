@@ -190,10 +190,9 @@ where
         let mut send_block_size = false;
 
         for i in 0..requests {
+            // TODO use proper safe conversion
             let option = unsafe { transmute(client.read_u16::<BigEndian>()?) };
             println!("Request {}/{}, option {:?}", i + 1, requests, option);
-
-            // TODO use proper safe conversion
 
             match option {
                 NbdInfoOpt::Export => todo!(),
