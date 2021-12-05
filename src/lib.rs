@@ -74,7 +74,7 @@ where
         Server { clients, export }
     }
 
-    pub fn negotiate(&mut self, client: &str) -> Result<(), Box<dyn Error>> {
+    pub fn handshake(&mut self, client: &str) -> Result<(), Box<dyn Error>> {
         self.export.init_flags()?;
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();

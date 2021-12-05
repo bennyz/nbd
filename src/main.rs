@@ -37,7 +37,7 @@ fn main() {
                 server
                     .add_connection(client.to_owned(), stream.try_clone().unwrap())
                     .unwrap();
-                if let Err(e) = server.negotiate(&client) {
+                if let Err(e) = server.handshake(&client) {
                     println!("Encountered error, shutting down stream: {}", e);
                     stream.shutdown(std::net::Shutdown::Both).unwrap();
                 }
