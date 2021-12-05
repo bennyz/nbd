@@ -8,6 +8,10 @@ pub const NBD_FLAG_C_NO_ZEROES: u32 = 1 << 1;
 pub const NBD_INIT_MAGIC: u64 = 0x4e42444d41474943;
 pub const NBD_OPTS_MAGIC: u64 = 0x49484156454F5054;
 pub const NBD_REP_MAGIC: u64 = 0x3e889045565a9;
+pub const NBD_SIMPLE_REPLY_MAGIC: u32 = 0x67446698;
+pub const NBD_REQUEST_MAGIC: u32 = 0x25609513;
+
+pub const NBD_REQUEST_SIZE: u32 = 28;
 
 // Reply errors
 pub const NBD_REP_FLAG_ERROR: u32 = 1 << 31;
@@ -31,7 +35,7 @@ pub const NBD_FLAG_SEND_RESIZE: u16 = 1 << 9;
 pub const NBD_FLAG_SEND_CACHE: u16 = 1 << 10;
 pub const NBD_FLAG_SEND_FAST_ZERO: u16 = 1 << 11;
 
-#[repr(u32)]
+#[repr(u16)]
 pub enum NbdCmd {
     Read,
     Write,

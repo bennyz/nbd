@@ -8,7 +8,11 @@ use std::path::Path;
 struct Opts {
     /// Sets a custom config file. Could have been an Option<T> with no default too
     file: String,
+
+    #[clap(default_value = "")]
     name: String,
+
+    #[clap(default_value = "")]
     description: String,
 }
 
@@ -37,8 +41,20 @@ fn main() {
                 server
                     .add_connection(client.to_owned(), stream.try_clone().unwrap())
                     .unwrap();
-                if let Err(e) = server.handshake(&client) {
-                    println!("Encountered error, shutting down stream: {}", e);
+                match server.handshake(&client) {
+                    Ok(nbd::HandshakeResult::Abort) => {
+                        println!("Handshake aborted");
+                        continue;
+                    }
+                    Ok(nbd::HandshakeResult::Continue) => {
+                        println!("Starting transmission");
+                    }
+                    Err(e) => {
+                        eprintln!("Encountered error, shutting down stream: {}", e);
+                    }
+                }
+                if let Err(e) = server.transmission(&client) {
+                    eprintln!("Encountered error, shutting down stream: {}", e);
                     stream.shutdown(std::net::Shutdown::Both).unwrap();
                 }
             }
