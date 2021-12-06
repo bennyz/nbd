@@ -4,6 +4,7 @@ use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
     NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
 };
+
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -64,10 +65,10 @@ impl Export {
 #[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
 #[repr(C)]
 struct OptionReply {
-    magic: [u8; 8],
-    option: [u8; 4],
-    reply_type: [u8; 4],
-    length: [u8; 4],
+    magic: u64,
+    option: u32,
+    reply_type: u32,
+    length: u32,
 }
 
 // NBD client request
@@ -75,12 +76,12 @@ struct OptionReply {
 #[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
 #[repr(C)]
 struct Request {
-    magic: [u8; 4],
-    flags: [u8; 2],
-    command_type: [u8; 2],
-    handle: [u8; 8],
-    offset: [u8; 8],
-    len: [u8; 4],
+    magic: u32,
+    flags: u16,
+    command_type: u16,
+    handle: u64,
+    offset: u64,
+    len: u32,
 }
 
 impl<T> Server<T>
@@ -196,34 +197,29 @@ where
                 &request_buf,
                 Configuration::standard()
                     .with_big_endian()
-                    .with_variable_int_encoding(),
+                    .with_fixed_int_encoding(),
             )?;
             println!("request {:?}", request);
 
             println!("Checking opts magic: {:?}", request.magic);
-            if u32::from_be_bytes(request.magic) != NBD_REQUEST_MAGIC {
+            if request.magic != NBD_REQUEST_MAGIC {
                 eprintln!(
                     "Bad magic received {:#02x}, expected {:#02x}",
-                    u32::from_be_bytes(request.magic),
-                    NBD_REQUEST_MAGIC
+                    request.magic, NBD_REQUEST_MAGIC
                 );
                 return Ok(());
             }
 
-            let cmd: NbdCmd = unsafe { transmute(u16::from_be_bytes(request.command_type)) };
+            let cmd: NbdCmd = unsafe { transmute(request.command_type) };
             match cmd {
                 NbdCmd::Read => {
                     println!("Received read request");
-                    let offset = u64::from_be_bytes(request.offset);
-                    let len = u32::from_be_bytes(request.len);
+                    let offset = request.offset;
+                    let len = request.len;
                     let mut buf: Vec<u8> = vec![0; len as usize];
                     let read = f.read_at(buf.as_mut_slice(), offset)?;
                     println!("Read {} bytes", read);
-                    Self::transmission_simple_reply_header(
-                        c,
-                        u64::from_be_bytes(request.handle),
-                        0,
-                    )?;
+                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
                     c.write_u64::<BigEndian>(read as u64)?;
                     c.flush()?;
                 }
@@ -366,12 +362,12 @@ where
     // TODO: support multiple (and actual) exports
     fn handle_list(client: &mut T, name: &str, description: &str) -> Result<(), Box<dyn Error>> {
         let reply_header = OptionReply {
-            magic: NBD_REP_MAGIC.to_be_bytes(),
-            option: (NbdOpt::List as u32).to_be_bytes(),
-            reply_type: (NbdReply::Server as u32).to_be_bytes(),
+            magic: NBD_REP_MAGIC,
+            option: (NbdOpt::List as u32),
+            reply_type: (NbdReply::Server as u32),
 
             // Why +4? size of the length field (32)
-            length: (name.len() as u32 + description.len() as u32 + 4).to_be_bytes(),
+            length: (name.len() as u32 + description.len() as u32 + 4),
         };
 
         Self::header_reply(client, reply_header)?;
@@ -393,15 +389,17 @@ where
         data: &[u8],
     ) -> Result<(), Box<dyn Error>> {
         let header = OptionReply {
-            magic: NBD_REP_MAGIC.to_be_bytes(),
-            option: (opt as u32).to_be_bytes(),
-            reply_type: (NbdReply::Info as u32).to_be_bytes(),
-            length: len.to_be_bytes(),
+            magic: NBD_REP_MAGIC,
+            option: (opt as u32),
+            reply_type: (NbdReply::Info as u32),
+            length: len,
         };
 
         client.write_all(&bincode::encode_to_vec(
             &header,
-            Configuration::standard().with_big_endian(),
+            Configuration::standard()
+                .with_big_endian()
+                .with_fixed_int_encoding(),
         )?)?;
         client.write_u16::<BigEndian>(info_type as u16)?;
 
@@ -416,10 +414,12 @@ where
     }
 
     fn header_reply(client: &mut T, header: OptionReply) -> Result<(), Box<dyn Error>> {
-        let config = Configuration::standard();
-        config.with_big_endian();
-        config.with_variable_int_encoding();
-        let serialized = bincode::encode_to_vec(&header, config)?;
+        let serialized = bincode::encode_to_vec(
+            &header,
+            Configuration::standard()
+                .with_big_endian()
+                .with_fixed_int_encoding(),
+        )?;
         dbg!(&serialized);
         client.write_all(&serialized)?;
         client.flush()?;
