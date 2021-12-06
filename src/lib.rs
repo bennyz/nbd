@@ -147,7 +147,14 @@ where
                     Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::ExportName => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    println!("Received EXPORT_NAME option");
+                    c.write_u64::<BigEndian>(self.export.size)?;
+
+                    // TODO use a sane way to initialize the flags
+                    let mut flags: u16 = 0;
+                    set_flags(&self.export, &mut flags);
+                    c.write_u16::<BigEndian>(flags)?;
+                    c.flush()?;
                 }
                 NbdOpt::List => {
                     Self::handle_list(c, &self.export.name, &self.export.description)?;
@@ -306,7 +313,7 @@ where
                 client,
                 opt,
                 NbdInfoOpt::Name,
-                self.export.name.len() as u32,
+                (self.export.name.len() + 2) as u32,
                 self.export.name.as_bytes(),
             )?;
         }
@@ -316,7 +323,7 @@ where
                 client,
                 opt,
                 NbdInfoOpt::Description,
-                self.export.description.len() as u32,
+                (self.export.description.len() + 2) as u32,
                 self.export.description.as_bytes(),
             )?;
         }
