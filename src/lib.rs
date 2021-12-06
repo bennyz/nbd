@@ -188,7 +188,7 @@ where
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();
 
-        let f = File::open(&self.export.path)?;
+        let f = &File::open(&self.export.path)?;
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
         loop {
             c.read_exact(&mut request_buf)?;
@@ -215,12 +215,12 @@ where
                 NbdCmd::Read => {
                     println!("Received read request");
                     let offset = request.offset;
-                    let len = request.len;
-                    let mut buf: Vec<u8> = vec![0; len as usize];
+                    let mut buf: Vec<u8> = vec![0; request.len as usize];
                     let read = f.read_at(buf.as_mut_slice(), offset)?;
                     println!("Read {} bytes", read);
                     Self::transmission_simple_reply_header(c, request.handle, 0)?;
-                    c.write_u64::<BigEndian>(read as u64)?;
+
+                    c.write_all(&buf)?;
                     c.flush()?;
                 }
                 NbdCmd::Write => {
@@ -405,7 +405,6 @@ where
 
         // Send payload
         if data != EMPTY_REPLY {
-            dbg!(data);
             client.write_all(data)?;
         }
         client.flush()?;
@@ -451,7 +450,6 @@ where
         client.write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
         client.write_u32::<BigEndian>(error)?;
         client.write_u64::<BigEndian>(handle)?;
-        client.flush()?;
 
         Ok(())
     }
