@@ -53,7 +53,7 @@ pub struct Export {
 }
 
 impl Export {
-    pub fn init_flags(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn init_export(&mut self) -> Result<(), Box<dyn Error>> {
         let path = Path::new(&self.path);
         let md = fs::metadata(path)?;
         self.size = md.size();
@@ -94,7 +94,7 @@ where
     }
 
     pub fn handshake(&mut self, client: &str) -> Result<HandshakeResult, Box<dyn Error>> {
-        self.export.init_flags()?;
+        self.export.init_export()?;
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();
         // 64 bits
@@ -330,12 +330,13 @@ where
 
         if send_block_size {
             let sizes: Vec<u32> = vec![
-                MIN_BLOCK_SIZE,
-                PREFERRED_BLOCK_SIZE,
-                std::cmp::min(self.export.size as u32, MAX_BLOCK_SIZE),
+                MIN_BLOCK_SIZE as u32,
+                PREFERRED_BLOCK_SIZE as u32,
+                std::cmp::min(self.export.size, MAX_BLOCK_SIZE) as u32,
             ];
 
-            println!("sending size {:?}", sizes);
+            println!("Reporting sizes {:?}", sizes);
+
             Self::info_reply(
                 client,
                 opt,

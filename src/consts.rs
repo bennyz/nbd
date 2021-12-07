@@ -17,9 +17,9 @@ pub const NBD_REQUEST_SIZE: u32 = 28;
 pub const NBD_REP_FLAG_ERROR: u32 = 1 << 31;
 
 // Custom
-pub const MIN_BLOCK_SIZE: u32 = 1;
-pub const PREFERRED_BLOCK_SIZE: u32 = 4096;
-pub const MAX_BLOCK_SIZE: u32 = 1 << 31;
+pub const MIN_BLOCK_SIZE: u64 = 1;
+pub const PREFERRED_BLOCK_SIZE: u64 = 4096;
+pub const MAX_BLOCK_SIZE: u64 = 32 * 1024 * 1024;
 
 // Flags https://github.com/NetworkBlockDevice/nbd/blob/master/doc/proto.md#transmission-flags
 pub const NBD_FLAG_HAS_FLAGS: u16 = 1 << 0;
