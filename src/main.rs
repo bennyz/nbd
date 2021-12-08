@@ -42,11 +42,11 @@ fn main() {
                     .add_connection(client.to_owned(), stream.try_clone().unwrap())
                     .unwrap();
                 match server.handshake(&client) {
-                    Ok(nbd::HandshakeResult::Abort) => {
+                    Ok(nbd::InteractionResult::Abort) => {
                         println!("Handshake aborted");
                         continue;
                     }
-                    Ok(nbd::HandshakeResult::Continue) => {
+                    Ok(nbd::InteractionResult::Continue) => {
                         println!("Starting transmission");
                     }
                     Err(e) => {

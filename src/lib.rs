@@ -1,10 +1,10 @@
+use anyhow::Result;
 use bincode::config::Configuration;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
     NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
 };
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
@@ -15,6 +15,7 @@ use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
 use std::path::Path;
 use std::rc::Rc;
+use thiserror::Error;
 
 use crate::consts::{
     NbdCmd, NbdInfoOpt, NbdOpt, MAX_BLOCK_SIZE, MIN_BLOCK_SIZE, NBD_INIT_MAGIC, NBD_OPTS_MAGIC,
@@ -25,7 +26,15 @@ pub mod consts;
 
 const EMPTY_REPLY: &[u8; 0] = b"";
 
-pub enum HandshakeResult {
+#[derive(Debug, Error)]
+pub enum NbdError {
+    #[error("Bad Magic Number: {0}")]
+    BadMagic(usize),
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+pub enum InteractionResult {
     Abort,
     Continue,
 }
@@ -92,7 +101,7 @@ where
         Server { clients, export }
     }
 
-    pub fn handshake(&mut self, client: &str) -> Result<HandshakeResult, Box<dyn Error>> {
+    pub fn handshake(&mut self, client: &str) -> Result<InteractionResult, Box<dyn Error>> {
         self.export.init_export()?;
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();
@@ -163,7 +172,7 @@ where
                     if Self::handshake_reply(c, option, NbdReply::Ack, EMPTY_REPLY).is_err() {
                         eprintln!("Ignoring abort ACK errors");
                     }
-                    return Ok(HandshakeResult::Abort);
+                    return Ok(InteractionResult::Abort);
                 }
                 NbdOpt::StructuredReply => {
                     Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
@@ -175,7 +184,7 @@ where
                 opt @ NbdOpt::Go => {
                     println!("received go!");
                     self.handle_export_info(c, opt)?;
-                    return Ok(HandshakeResult::Continue);
+                    return Ok(InteractionResult::Continue);
                 }
                 NbdOpt::ListMetaContext => {
                     Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
@@ -190,7 +199,7 @@ where
         }
     }
 
-    pub fn transmission(&self, client: &str) -> Result<(), Box<dyn Error>> {
+    pub fn transmission(&self, client: &str) -> Result<InteractionResult> {
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();
 
@@ -213,7 +222,8 @@ where
                     "Bad magic received {:#02x}, expected {:#02x}",
                     request.magic, NBD_REQUEST_MAGIC
                 );
-                return Ok(());
+
+                return Err(anyhow::anyhow!(NbdError::BadMagic(request.magic as usize)));
             }
 
             let cmd: NbdCmd = unsafe { transmute(request.command_type) };
@@ -233,7 +243,8 @@ where
                     println!("write!");
                 }
                 NbdCmd::Disc => {
-                    println!("disconnect!");
+                    println!("Disconnect requested");
+                    c.flush()?;
                 }
                 NbdCmd::Flush => {
                     c.flush()?;
@@ -449,11 +460,7 @@ where
         Ok(())
     }
 
-    fn transmission_simple_reply_header(
-        client: &mut T,
-        handle: u64,
-        error: u32,
-    ) -> Result<(), Box<dyn Error>> {
+    fn transmission_simple_reply_header(client: &mut T, handle: u64, error: u32) -> Result<()> {
         client.write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
         client.write_u32::<BigEndian>(error)?;
         client.write_u64::<BigEndian>(handle)?;
