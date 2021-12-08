@@ -5,7 +5,6 @@ use consts::{
     NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
 };
 
-use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
@@ -62,7 +61,7 @@ impl Export {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
+#[derive(Debug, bincode::Encode, bincode::Decode)]
 #[repr(C)]
 struct OptionReply {
     magic: u64,
@@ -73,7 +72,7 @@ struct OptionReply {
 
 // NBD client request
 // #define NBD_REQUEST_SIZE            (4 + 2 + 2 + 8 + 8 + 4)
-#[derive(Debug, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
+#[derive(Debug, bincode::Encode, bincode::Decode)]
 #[repr(C)]
 struct Request {
     magic: u32,
