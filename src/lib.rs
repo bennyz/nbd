@@ -230,9 +230,8 @@ where
             match cmd {
                 NbdCmd::Read => {
                     println!("Received read request");
-                    let offset = request.offset;
                     let mut buf: Vec<u8> = vec![0; request.len as usize];
-                    let read = f.read_at(buf.as_mut_slice(), offset)?;
+                    let read = f.read_at(buf.as_mut_slice(), request.offset)?;
                     println!("Read {} bytes", read);
                     Self::transmission_simple_reply_header(c, request.handle, 0)?;
 
