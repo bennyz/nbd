@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
@@ -203,7 +203,14 @@ where
         let mut clients = self.clients.borrow_mut();
         let c = clients.get_mut(client).unwrap();
 
-        let f = &File::open(&self.export.path)?;
+        let mut opts = OpenOptions::new();
+        opts.read(true);
+        if !self.export.read_only {
+            opts.write(true);
+        }
+
+        let file = &opts.open(&self.export.path)?;
+
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
         loop {
             c.read_exact(&mut request_buf)?;
@@ -229,9 +236,13 @@ where
             let cmd: NbdCmd = unsafe { transmute(request.command_type) };
             match cmd {
                 NbdCmd::Read => {
-                    println!("Received read request");
+                    println!(
+                        "Received read request, len {}, offset {}",
+                        request.len, request.offset
+                    );
+
                     let mut buf: Vec<u8> = vec![0; request.len as usize];
-                    let read = f.read_at(buf.as_mut_slice(), request.offset)?;
+                    let read = file.read_at(buf.as_mut_slice(), request.offset)?;
                     println!("Read {} bytes", read);
                     Self::transmission_simple_reply_header(c, request.handle, 0)?;
 
@@ -239,7 +250,16 @@ where
                     c.flush()?;
                 }
                 NbdCmd::Write => {
-                    println!("write!");
+                    println!(
+                        "Received write request, len {}, offset {}",
+                        request.len, request.offset
+                    );
+
+                    let mut buf: Vec<u8> = vec![0; request.len as usize];
+                    c.read_exact(buf.as_mut_slice())?;
+                    file.write_at(&buf, request.offset)?;
+                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
+                    c.flush()?;
                 }
                 NbdCmd::Disc => {
                     println!("Disconnect requested");

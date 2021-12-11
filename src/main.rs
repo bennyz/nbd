@@ -26,7 +26,6 @@ fn main() {
         name: args.name,
         description: args.description,
         path: args.file,
-        read_only: true,
         ..Default::default()
     };
 
