@@ -45,6 +45,7 @@ fn main() {
                 match server.handshake(&client) {
                     Ok(nbd::InteractionResult::Abort) => {
                         println!("Handshake aborted");
+                        stream.shutdown(std::net::Shutdown::Both).unwrap();
                         continue;
                     }
                     Ok(nbd::InteractionResult::Continue) => {
@@ -52,6 +53,9 @@ fn main() {
                     }
                     Err(e) => {
                         eprintln!("Encountered error, shutting down stream: {}", e);
+                        stream.shutdown(std::net::Shutdown::Both).unwrap();
+
+                        continue;
                     }
                 }
 
@@ -59,10 +63,15 @@ fn main() {
                     Ok(nbd::InteractionResult::Continue) => {}
                     Ok(nbd::InteractionResult::Abort) => {
                         println!("Transmission aborted");
+                        stream.shutdown(std::net::Shutdown::Both).unwrap();
+
                         continue;
                     }
                     Err(e) => {
                         eprintln!("Encountered error, shutting down stream: {}", e);
+                        stream.shutdown(std::net::Shutdown::Both).unwrap();
+
+                        continue;
                     }
                 }
             }
