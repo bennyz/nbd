@@ -290,7 +290,6 @@ where
 
         let mut send_name = false;
         let mut send_description = false;
-        let mut send_block_size = false;
 
         for i in 0..requests {
             // TODO use proper safe conversion
@@ -311,7 +310,6 @@ where
                 }
                 NbdInfoOpt::BlockSize => {
                     println!("block size requested");
-                    send_block_size = true;
                 }
                 NbdInfoOpt::Unknown => {
                     panic!("Shouldn't happen");
@@ -339,39 +337,37 @@ where
             )?;
         }
 
-        if send_block_size {
-            let sizes: Vec<u32> = vec![
-                MIN_BLOCK_SIZE as u32,
-                PREFERRED_BLOCK_SIZE as u32,
-                std::cmp::min(self.export.size, MAX_BLOCK_SIZE) as u32,
-            ];
+        let sizes: Vec<u32> = vec![
+            MIN_BLOCK_SIZE as u32,
+            PREFERRED_BLOCK_SIZE as u32,
+            std::cmp::min(self.export.size, MAX_BLOCK_SIZE) as u32,
+        ];
 
-            println!("Reporting sizes {:?}", sizes);
+        println!("Reporting sizes {:?}", sizes);
 
-            Self::info_reply(
-                client,
-                opt,
-                NbdInfoOpt::BlockSize,
-                14,
-                &sizes
-                    .iter()
-                    .flat_map(|x| x.to_be_bytes())
-                    .collect::<Vec<u8>>(),
-            )?;
+        Self::info_reply(
+            client,
+            opt,
+            NbdInfoOpt::BlockSize,
+            14,
+            &sizes
+                .iter()
+                .flat_map(|x| x.to_be_bytes())
+                .collect::<Vec<u8>>(),
+        )?;
 
-            let mut flags: u16 = 0;
-            set_flags(&self.export, &mut flags);
+        let mut flags: u16 = 0;
+        set_flags(&self.export, &mut flags);
 
-            println!(
-                "Sending export '{}' information, flags {}",
-                self.export.name, flags
-            );
-            Self::info_reply(client, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
+        println!(
+            "Sending export '{}' information, flags {}",
+            self.export.name, flags
+        );
+        Self::info_reply(client, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
 
-            client.write_all(&self.export.size.to_be_bytes())?;
-            client.write_all(&flags.to_be_bytes())?;
-            client.flush()?;
-        }
+        client.write_all(&self.export.size.to_be_bytes())?;
+        client.write_all(&flags.to_be_bytes())?;
+        client.flush()?;
 
         Self::handshake_reply(client, opt, NbdReply::Ack, EMPTY_REPLY)?;
 
