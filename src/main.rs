@@ -41,6 +41,7 @@ fn main() {
                 server
                     .add_connection(client.to_owned(), stream.try_clone().unwrap())
                     .unwrap();
+
                 match server.handshake(&client) {
                     Ok(nbd::InteractionResult::Abort) => {
                         println!("Handshake aborted");
@@ -53,9 +54,16 @@ fn main() {
                         eprintln!("Encountered error, shutting down stream: {}", e);
                     }
                 }
-                if let Err(e) = server.transmission(&client) {
-                    eprintln!("Encountered error, shutting down stream: {}", e);
-                    stream.shutdown(std::net::Shutdown::Both).unwrap();
+
+                match server.transmission(&client) {
+                    Ok(nbd::InteractionResult::Continue) => {}
+                    Ok(nbd::InteractionResult::Abort) => {
+                        println!("Transmission aborted");
+                        continue;
+                    }
+                    Err(e) => {
+                        eprintln!("Encountered error, shutting down stream: {}", e);
+                    }
                 }
             }
             Err(e) => {

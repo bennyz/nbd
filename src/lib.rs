@@ -245,6 +245,7 @@ where
                 NbdCmd::Disc => {
                     println!("Disconnect requested");
                     c.flush()?;
+                    return Ok(InteractionResult::Abort);
                 }
                 NbdCmd::Flush => {
                     c.flush()?;
