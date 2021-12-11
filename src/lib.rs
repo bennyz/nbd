@@ -58,6 +58,7 @@ pub struct Export {
     pub flush: bool,
     pub rotational: bool,
     pub df: bool,
+    pub multiconn: bool,
 }
 
 impl Export {
@@ -504,5 +505,11 @@ fn set_flags(export: &Export, flags: &mut u16) {
     }
     if export.flush {
         *flags |= consts::NBD_FLAG_SEND_FLUSH;
+    }
+    if export.df {
+        *flags |= consts::NBD_FLAG_SEND_DF;
+    }
+    if export.multiconn {
+        *flags |= consts::NBD_FLAG_CAN_MULTI_CONN;
     }
 }

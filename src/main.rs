@@ -26,6 +26,7 @@ fn main() {
         name: args.name,
         description: args.description,
         path: args.file,
+        multiconn: true,
         ..Default::default()
     };
 
