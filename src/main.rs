@@ -4,8 +4,8 @@ use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 
 #[derive(Parser, Clone)]
-#[clap(version = "0.0,.")]
-struct Opts {
+#[clap(version = "0.0.1")]
+struct Args {
     /// Sets a custom config file. Could have been an Option<T> with no default too
     file: String,
 
@@ -17,15 +17,15 @@ struct Opts {
 }
 
 fn main() {
-    let opts = Opts::parse();
-    if !Path::exists(Path::new(&opts.file)) {
-        panic!("{} does not exist!", opts.file);
+    let args = Args::parse();
+    if !Path::exists(Path::new(&args.file)) {
+        panic!("{} does not exist!", args.file);
     }
 
     let export = Export {
-        name: opts.name,
-        description: opts.description,
-        path: opts.file,
+        name: args.name,
+        description: args.description,
+        path: args.file,
         read_only: true,
         ..Default::default()
     };
