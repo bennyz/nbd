@@ -179,11 +179,11 @@ where
                     Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 opt @ NbdOpt::Info => {
-                    println!("received info!");
+                    println!("Received info");
                     self.handle_export_info(c, opt)?;
                 }
                 opt @ NbdOpt::Go => {
-                    println!("received go!");
+                    println!("Received go");
                     self.handle_export_info(c, opt)?;
                     return Ok(InteractionResult::Continue);
                 }
@@ -222,7 +222,6 @@ where
                     .with_big_endian()
                     .with_fixed_int_encoding(),
             )?;
-            println!("request {:?}", request);
 
             println!("Checking opts magic: {:?}", request.magic);
             if request.magic != NBD_REQUEST_MAGIC {
@@ -268,8 +267,8 @@ where
                     return Ok(InteractionResult::Abort);
                 }
                 NbdCmd::Flush => {
+                    println!("Received flush");
                     c.flush()?;
-                    println!("flush!");
                 }
                 NbdCmd::Trim => {
                     println!("trim!");
