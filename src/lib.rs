@@ -1,11 +1,11 @@
 use anyhow::Result;
 use bincode::config::Configuration;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use client::Client;
 use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
     NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
 };
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
@@ -14,7 +14,6 @@ use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
 use std::path::Path;
-use std::rc::Rc;
 use thiserror::Error;
 
 use crate::consts::{
@@ -22,6 +21,7 @@ use crate::consts::{
     NBD_REQUEST_MAGIC, NBD_REQUEST_SIZE, PREFERRED_BLOCK_SIZE,
 };
 
+pub mod client;
 pub mod consts;
 
 const EMPTY_REPLY: &[u8; 0] = b"";
@@ -37,12 +37,6 @@ pub enum NbdError {
 pub enum InteractionResult {
     Abort,
     Continue,
-}
-
-#[derive(Debug, Default)]
-pub struct Server<T: Read + Write + Debug> {
-    clients: Rc<RefCell<HashMap<String, T>>>,
-    export: Export,
 }
 
 #[derive(Debug, Default)]
@@ -62,11 +56,11 @@ pub struct Export {
 }
 
 impl Export {
-    pub fn init_export(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn init_export(&mut self) -> Result<(), anyhow::Error> {
         let path = Path::new(&self.path);
         let md = fs::metadata(path)?;
         self.size = md.size();
-
+        println!("md size {}", self.size);
         Ok(())
     }
 }
@@ -93,34 +87,54 @@ struct Request {
     len: u32,
 }
 
+#[derive(Debug, Default)]
+pub struct Server<T: Read + Write> {
+    clients: HashMap<String, Client<T>>,
+    export: Export,
+}
+
 impl<T> Server<T>
 where
-    T: Read + Write + Debug,
+    T: Read + Write,
 {
     pub fn new(export: Export) -> Self {
-        let clients = Rc::new(RefCell::new(HashMap::new()));
+        let clients = HashMap::new();
         Server { clients, export }
     }
 
-    pub fn handshake(&mut self, client: &str) -> Result<InteractionResult, Box<dyn Error>> {
-        self.export.init_export()?;
-        let mut clients = self.clients.borrow_mut();
-        let c = clients.get_mut(client).unwrap();
+    pub fn handle(&mut self, c: Client<T>) -> Result<(), anyhow::Error> {
+        self.export.init_export().unwrap();
+        let addr = c.addr().to_owned();
+        self.add_connection(c).unwrap();
+        let client = self.clients.get(&addr).unwrap();
+        self.handshake(&client).unwrap();
+        self.transmission(&client).unwrap();
+
+        Ok(())
+    }
+
+    fn handshake(&self, c: &Client<T>) -> Result<InteractionResult, Box<dyn Error>> {
         // 64 bits
-        c.write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
+        c.stream()
+            .borrow_mut()
+            .write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
 
         // 64 bits
-        c.write_all(&NBD_OPTS_MAGIC.to_be_bytes())?;
+        c.stream()
+            .borrow_mut()
+            .write_all(&NBD_OPTS_MAGIC.to_be_bytes())?;
 
         // 16 bits
         let handshake_flags = NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES;
 
-        c.write_u16::<BigEndian>(handshake_flags)?;
-        c.flush()?;
+        c.stream()
+            .borrow_mut()
+            .write_u16::<BigEndian>(handshake_flags)?;
+        c.stream().borrow_mut().flush()?;
 
         // Start reading client negotiation
         // option flags
-        let client_flags = c.read_u32::<BigEndian>()?;
+        let client_flags = c.stream().borrow_mut().read_u32::<BigEndian>()?;
         println!("Received client flags: {:#02x}", client_flags);
         if client_flags != NBD_FLAG_C_FIXED_NEWSTYLE
             && client_flags != (NBD_FLAG_C_FIXED_NEWSTYLE | NBD_FLAG_C_NO_ZEROES)
@@ -130,7 +144,7 @@ where
 
         loop {
             // Check client magic
-            let client_magic = c.read_u64::<BigEndian>()?;
+            let client_magic = c.stream().borrow_mut().read_u64::<BigEndian>()?;
             println!("Checking opts magic: {:#02x}", client_magic);
             if client_magic != NBD_OPTS_MAGIC {
                 eprintln!(
@@ -141,11 +155,11 @@ where
             }
 
             // Read option
-            let option = c.read_u32::<BigEndian>()?;
+            let option = c.stream().borrow_mut().read_u32::<BigEndian>()?;
             println!("Checking option {:#02x}", option);
 
             // Read option length
-            let option_length = c.read_u32::<BigEndian>()?;
+            let option_length = c.stream().borrow_mut().read_u32::<BigEndian>()?;
             println!("Received option length {}", option_length);
 
             // TODO: Remove later
@@ -153,30 +167,35 @@ where
 
             match option {
                 NbdOpt::Export => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::ExportName => {
                     println!("Received EXPORT_NAME option");
-                    c.write_u64::<BigEndian>(self.export.size)?;
+                    c.stream()
+                        .borrow_mut()
+                        .write_u64::<BigEndian>(self.export.size)?;
 
                     // TODO use a sane way to initialize the flags
                     let mut flags: u16 = 0;
                     set_flags(&self.export, &mut flags);
-                    c.write_u16::<BigEndian>(flags)?;
-                    c.flush()?;
+                    c.stream().borrow_mut().write_u16::<BigEndian>(flags)?;
+                    c.stream().borrow_mut().flush()?;
                 }
                 NbdOpt::List => {
-                    Self::handle_list(c, &self.export.name, &self.export.description)?;
+                    self.handle_list(c, &self.export.name, &self.export.description)?;
                 }
                 NbdOpt::Abort => {
                     println!("Aborting");
-                    if Self::handshake_reply(c, option, NbdReply::Ack, EMPTY_REPLY).is_err() {
+                    if self
+                        .handshake_reply(c, option, NbdReply::Ack, EMPTY_REPLY)
+                        .is_err()
+                    {
                         eprintln!("Ignoring abort ACK errors");
                     }
                     return Ok(InteractionResult::Abort);
                 }
                 NbdOpt::StructuredReply => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 opt @ NbdOpt::Info => {
                     println!("Received info");
@@ -188,22 +207,19 @@ where
                     return Ok(InteractionResult::Continue);
                 }
                 NbdOpt::ListMetaContext => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::SetMetaContext => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::StartTls => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
             }
         }
     }
 
-    pub fn transmission(&self, client: &str) -> Result<InteractionResult> {
-        let mut clients = self.clients.borrow_mut();
-        let c = clients.get_mut(client).unwrap();
-
+    fn transmission(&self, c: &Client<T>) -> Result<InteractionResult> {
         let mut opts = OpenOptions::new();
         opts.read(true);
         if !self.export.read_only {
@@ -214,7 +230,7 @@ where
 
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
         loop {
-            c.read_exact(&mut request_buf)?;
+            c.stream().borrow_mut().read_exact(&mut request_buf)?;
 
             let request: Request = bincode::decode_from_slice(
                 &request_buf,
@@ -244,10 +260,10 @@ where
                     let mut buf: Vec<u8> = vec![0; request.len as usize];
                     let read = file.read_at(buf.as_mut_slice(), request.offset)?;
                     println!("Read {} bytes", read);
-                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
+                    self.transmission_simple_reply_header(c, request.handle, 0)?;
 
-                    c.write_all(&buf)?;
-                    c.flush()?;
+                    c.stream().borrow_mut().write_all(&buf)?;
+                    c.stream().borrow_mut().flush()?;
                 }
                 NbdCmd::Write => {
                     println!(
@@ -256,19 +272,19 @@ where
                     );
 
                     let mut buf: Vec<u8> = vec![0; request.len as usize];
-                    c.read_exact(buf.as_mut_slice())?;
+                    c.stream().borrow_mut().read_exact(buf.as_mut_slice())?;
                     file.write_at(&buf, request.offset)?;
-                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
-                    c.flush()?;
+                    self.transmission_simple_reply_header(c, request.handle, 0)?;
+                    c.stream().borrow_mut().flush()?;
                 }
                 NbdCmd::Disc => {
                     println!("Disconnect requested");
-                    c.flush()?;
+                    c.stream().borrow_mut().flush()?;
                     return Ok(InteractionResult::Abort);
                 }
                 NbdCmd::Flush => {
                     println!("Received flush");
-                    c.flush()?;
+                    c.stream().borrow_mut().flush()?;
                 }
                 NbdCmd::Trim => {
                     println!("trim!");
@@ -286,25 +302,25 @@ where
         }
     }
 
-    pub fn add_connection(&mut self, client_addr: String, stream: T) -> Result<(), Box<dyn Error>> {
-        self.clients.borrow_mut().insert(client_addr, stream);
+    fn add_connection(&mut self, client: Client<T>) -> Result<(), Box<dyn Error>> {
+        self.clients.insert(client.addr().to_owned(), client);
 
         Ok(())
     }
 
-    fn handle_export_info(&self, client: &mut T, opt: NbdOpt) -> Result<(), Box<dyn Error>> {
+    fn handle_export_info(&self, c: &Client<T>, opt: NbdOpt) -> Result<(), Box<dyn Error>> {
         // Read name length
-        let len = client.read_u32::<BigEndian>()?;
+        let len = c.stream().borrow_mut().read_u32::<BigEndian>()?;
         println!("Received length {}", len);
         let mut buf: Vec<u8> = vec![0; len as usize];
 
         // Read name
-        client.read_exact(buf.as_mut_slice())?;
+        c.stream().borrow_mut().read_exact(buf.as_mut_slice())?;
         let export_name = String::from_utf8(buf.clone())?;
         println!("Received export name {}", export_name);
 
         // Read number of requests
-        let requests = client.read_u16::<BigEndian>()?;
+        let requests = c.stream().borrow_mut().read_u16::<BigEndian>()?;
         println!("Receiving {} request(s)", requests);
 
         let mut send_name = false;
@@ -312,7 +328,7 @@ where
 
         for i in 0..requests {
             // TODO use proper safe conversion
-            let option = unsafe { transmute(client.read_u16::<BigEndian>()?) };
+            let option = unsafe { transmute(c.stream().borrow_mut().read_u16::<BigEndian>()?) };
             println!("Request {}/{}, option {:?}", i + 1, requests, option);
 
             match option {
@@ -337,8 +353,8 @@ where
         }
 
         if send_name {
-            Self::info_reply(
-                client,
+            self.info_reply(
+                c,
                 opt,
                 NbdInfoOpt::Name,
                 (self.export.name.len() + 2) as u32,
@@ -347,8 +363,8 @@ where
         }
 
         if send_description {
-            Self::info_reply(
-                client,
+            self.info_reply(
+                c,
                 opt,
                 NbdInfoOpt::Description,
                 (self.export.description.len() + 2) as u32,
@@ -364,8 +380,8 @@ where
 
         println!("Reporting sizes {:?}", sizes);
 
-        Self::info_reply(
-            client,
+        self.info_reply(
+            c,
             opt,
             NbdInfoOpt::BlockSize,
             14,
@@ -382,19 +398,26 @@ where
             "Sending export '{}' information, flags {}",
             self.export.name, flags
         );
-        Self::info_reply(client, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
+        self.info_reply(c, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
 
-        client.write_all(&self.export.size.to_be_bytes())?;
-        client.write_all(&flags.to_be_bytes())?;
-        client.flush()?;
+        c.stream()
+            .borrow_mut()
+            .write_all(&self.export.size.to_be_bytes())?;
+        c.stream().borrow_mut().write_all(&flags.to_be_bytes())?;
+        c.stream().borrow_mut().flush()?;
 
-        Self::handshake_reply(client, opt, NbdReply::Ack, EMPTY_REPLY)?;
+        self.handshake_reply(c, opt, NbdReply::Ack, EMPTY_REPLY)?;
 
         Ok(())
     }
 
     // TODO: support multiple (and actual) exports
-    fn handle_list(client: &mut T, name: &str, description: &str) -> Result<(), Box<dyn Error>> {
+    fn handle_list(
+        &self,
+        c: &Client<T>,
+        name: &str,
+        description: &str,
+    ) -> Result<(), Box<dyn Error>> {
         let reply_header = OptionReply {
             magic: NBD_REP_MAGIC,
             option: (NbdOpt::List as u32),
@@ -404,19 +427,22 @@ where
             length: (name.len() as u32 + description.len() as u32 + 4),
         };
 
-        Self::header_reply(client, reply_header)?;
-        client.write_all(&(name.len() as u32).to_be_bytes())?;
-        client.write_all(name.as_bytes())?;
-        client.write_all(description.as_bytes())?;
-        client.flush()?;
+        self.header_reply(c, reply_header)?;
+        c.stream()
+            .borrow_mut()
+            .write_all(&(name.len() as u32).to_be_bytes())?;
+        c.stream().borrow_mut().write_all(name.as_bytes())?;
+        c.stream().borrow_mut().write_all(description.as_bytes())?;
+        c.stream().borrow_mut().flush()?;
 
-        Self::handshake_reply(client, NbdOpt::List, NbdReply::Ack, EMPTY_REPLY)?;
+        self.handshake_reply(c, NbdOpt::List, NbdReply::Ack, EMPTY_REPLY)?;
 
         Ok(())
     }
 
     fn info_reply(
-        client: &mut T,
+        &self,
+        c: &Client<T>,
         opt: NbdOpt,
         info_type: NbdInfoOpt,
         len: u32,
@@ -429,24 +455,26 @@ where
             length: len,
         };
 
-        client.write_all(&bincode::encode_to_vec(
+        c.stream().borrow_mut().write_all(&bincode::encode_to_vec(
             &header,
             Configuration::standard()
                 .with_big_endian()
                 .with_fixed_int_encoding(),
         )?)?;
-        client.write_u16::<BigEndian>(info_type as u16)?;
+        c.stream()
+            .borrow_mut()
+            .write_u16::<BigEndian>(info_type as u16)?;
 
         // Send payload
         if data != EMPTY_REPLY {
-            client.write_all(data)?;
+            c.stream().borrow_mut().write_all(data)?;
         }
-        client.flush()?;
+        c.stream().borrow_mut().flush()?;
 
         Ok(())
     }
 
-    fn header_reply(client: &mut T, header: OptionReply) -> Result<(), Box<dyn Error>> {
+    fn header_reply(&self, c: &Client<T>, header: OptionReply) -> Result<(), Box<dyn Error>> {
         let serialized = bincode::encode_to_vec(
             &header,
             Configuration::standard()
@@ -454,32 +482,48 @@ where
                 .with_fixed_int_encoding(),
         )?;
         dbg!(&serialized);
-        client.write_all(&serialized)?;
-        client.flush()?;
+        c.stream().borrow_mut().write_all(&serialized)?;
+        c.stream().borrow_mut().flush()?;
 
         Ok(())
     }
 
     fn handshake_reply(
-        client: &mut T,
+        &self,
+        c: &Client<T>,
         client_option: NbdOpt,
         reply_type: NbdReply,
         data: &[u8],
     ) -> Result<(), Box<dyn Error>> {
-        client.write_u64::<BigEndian>(NBD_REP_MAGIC)?;
-        client.write_u32::<BigEndian>(client_option as u32)?;
-        client.write_u32::<BigEndian>(reply_type as u32)?;
-        client.write_u32::<BigEndian>(data.len() as u32)?;
-        client.write_all(data)?;
-        client.flush()?;
+        c.stream()
+            .borrow_mut()
+            .write_u64::<BigEndian>(NBD_REP_MAGIC)?;
+        c.stream()
+            .borrow_mut()
+            .write_u32::<BigEndian>(client_option as u32)?;
+        c.stream()
+            .borrow_mut()
+            .write_u32::<BigEndian>(reply_type as u32)?;
+        c.stream()
+            .borrow_mut()
+            .write_u32::<BigEndian>(data.len() as u32)?;
+        c.stream().borrow_mut().write_all(data)?;
+        c.stream().borrow_mut().flush()?;
 
         Ok(())
     }
 
-    fn transmission_simple_reply_header(client: &mut T, handle: u64, error: u32) -> Result<()> {
-        client.write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
-        client.write_u32::<BigEndian>(error)?;
-        client.write_u64::<BigEndian>(handle)?;
+    fn transmission_simple_reply_header(
+        &self,
+        c: &Client<T>,
+        handle: u64,
+        error: u32,
+    ) -> Result<()> {
+        c.stream()
+            .borrow_mut()
+            .write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
+        c.stream().borrow_mut().write_u32::<BigEndian>(error)?;
+        c.stream().borrow_mut().write_u64::<BigEndian>(handle)?;
 
         Ok(())
     }

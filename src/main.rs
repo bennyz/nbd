@@ -1,7 +1,9 @@
 use clap::Parser;
+use nbd::client::Client;
 use nbd::{self, Export, Server};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
+use std::rc::Rc;
 
 #[derive(Parser, Clone)]
 #[clap(version = "0.0.1")]
@@ -37,43 +39,9 @@ fn main() {
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
-                let client = stream.peer_addr().unwrap().to_string();
-                server
-                    .add_connection(client.to_owned(), stream.try_clone().unwrap())
-                    .unwrap();
-
-                match server.handshake(&client) {
-                    Ok(nbd::InteractionResult::Abort) => {
-                        println!("Handshake aborted");
-                        stream.shutdown(std::net::Shutdown::Both).unwrap();
-                        continue;
-                    }
-                    Ok(nbd::InteractionResult::Continue) => {
-                        println!("Starting transmission");
-                    }
-                    Err(e) => {
-                        eprintln!("Encountered error, shutting down stream: {}", e);
-                        stream.shutdown(std::net::Shutdown::Both).unwrap();
-
-                        continue;
-                    }
-                }
-
-                match server.transmission(&client) {
-                    Ok(nbd::InteractionResult::Continue) => {}
-                    Ok(nbd::InteractionResult::Abort) => {
-                        println!("Transmission aborted");
-                        stream.shutdown(std::net::Shutdown::Both).unwrap();
-
-                        continue;
-                    }
-                    Err(e) => {
-                        eprintln!("Encountered error, shutting down stream: {}", e);
-                        stream.shutdown(std::net::Shutdown::Both).unwrap();
-
-                        continue;
-                    }
-                }
+                let client_addr = stream.peer_addr().unwrap().to_string();
+                let client = Client::new(stream, client_addr);
+                server.handle(client).unwrap();
             }
             Err(e) => {
                 eprintln!("error: {}", e)
