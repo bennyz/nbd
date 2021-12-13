@@ -6,6 +6,7 @@ use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
     NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
 };
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
@@ -14,6 +15,7 @@ use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
 use std::path::Path;
+
 use thiserror::Error;
 
 use crate::consts::{
@@ -106,9 +108,36 @@ where
         self.export.init_export().unwrap();
         let addr = c.addr().to_owned();
         self.add_connection(c).unwrap();
-        let client = self.clients.get_mut(&addr).unwrap();
-        Self::handshake(client, &self.export).unwrap();
-        Self::transmission(client, &self.export).unwrap();
+
+        let mut client = self.clients.get_mut(&addr).unwrap();
+
+        while let Ok(res) = Self::handshake(&mut client, &self.export) {
+            match res {
+                InteractionResult::Abort => {
+                    println!("Aborting connection");
+                    self.remove_connection(&addr).unwrap();
+                    return Ok(());
+                }
+                InteractionResult::Continue => {
+                    println!("Continuing connection");
+                    break;
+                }
+            }
+        }
+
+        while let Ok(res) = Self::transmission(&mut client, &self.export) {
+            match res {
+                InteractionResult::Abort => {
+                    println!("Aborting connection");
+                    self.remove_connection(&addr).unwrap();
+                    return Ok(());
+                }
+                InteractionResult::Continue => {
+                    println!("Continuing connection");
+                    break;
+                }
+            }
+        }
 
         Ok(())
     }
@@ -169,7 +198,7 @@ where
 
                     // TODO use a sane way to initialize the flags
                     let mut flags: u16 = 0;
-                    set_flags(&export, &mut flags);
+                    set_flags(export, &mut flags);
                     c.stream().write_u16::<BigEndian>(flags)?;
                     c.stream().flush()?;
                 }
@@ -297,7 +326,17 @@ where
         Ok(())
     }
 
-    fn handle_export_info(c: &mut Client<T>, opt: NbdOpt, export: &Export) -> Result<(), Box<dyn Error>> {
+    fn remove_connection(&mut self, addr: &str) -> Result<(), Box<dyn Error>> {
+        self.clients.remove(addr);
+
+        Ok(())
+    }
+
+    fn handle_export_info(
+        c: &mut Client<T>,
+        opt: NbdOpt,
+        export: &Export,
+    ) -> Result<(), Box<dyn Error>> {
         // Read name length
         let len = c.stream().read_u32::<BigEndian>()?;
         println!("Received length {}", len);

@@ -1,7 +1,4 @@
-use std::{
-    cell::RefCell,
-    io::{Read, Write},
-};
+use std::io::{Read, Write};
 
 #[derive(Debug, Default)]
 pub struct Client<T: Read + Write> {

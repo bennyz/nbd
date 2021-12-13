@@ -3,7 +3,6 @@ use nbd::client::Client;
 use nbd::{self, Export, Server};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::rc::Rc;
 
 #[derive(Parser, Clone)]
 #[clap(version = "0.0.1")]
