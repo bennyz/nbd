@@ -5,7 +5,7 @@ use std::{
 
 #[derive(Debug, Default)]
 pub struct Client<T: Read + Write> {
-    stream: RefCell<T>,
+    stream: T,
     structured_reply: bool,
     addr: String,
 }
@@ -13,7 +13,7 @@ pub struct Client<T: Read + Write> {
 impl<T: Read + Write> Client<T> {
     pub fn new(stream: T, addr: String) -> Self {
         Client {
-            stream: RefCell::new(stream),
+            stream,
             structured_reply: false,
             addr,
         }
@@ -23,23 +23,23 @@ impl<T: Read + Write> Client<T> {
         &self.addr
     }
 
-    pub fn stream(&self) -> &RefCell<T> {
-        &self.stream
+    pub fn stream(&mut self) -> &mut T {
+        &mut self.stream
     }
 }
 
 impl<T: Read + Write> Write for Client<T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.stream.borrow_mut().write(buf)
+        self.stream.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.stream.borrow_mut().flush()
+        self.stream.flush()
     }
 }
 
 impl<T: Read + Write> Read for Client<T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.stream.borrow_mut().read(buf)
+        self.stream.read(buf)
     }
 }

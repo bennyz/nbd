@@ -106,35 +106,29 @@ where
         self.export.init_export().unwrap();
         let addr = c.addr().to_owned();
         self.add_connection(c).unwrap();
-        let client = self.clients.get(&addr).unwrap();
-        self.handshake(&client).unwrap();
-        self.transmission(&client).unwrap();
+        let client = self.clients.get_mut(&addr).unwrap();
+        Self::handshake(client, &self.export).unwrap();
+        Self::transmission(client, &self.export).unwrap();
 
         Ok(())
     }
 
-    fn handshake(&self, c: &Client<T>) -> Result<InteractionResult, Box<dyn Error>> {
+    fn handshake(c: &mut Client<T>, export: &Export) -> Result<InteractionResult, Box<dyn Error>> {
         // 64 bits
-        c.stream()
-            .borrow_mut()
-            .write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
+        c.stream().write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
 
         // 64 bits
-        c.stream()
-            .borrow_mut()
-            .write_all(&NBD_OPTS_MAGIC.to_be_bytes())?;
+        c.stream().write_all(&NBD_OPTS_MAGIC.to_be_bytes())?;
 
         // 16 bits
         let handshake_flags = NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES;
 
-        c.stream()
-            .borrow_mut()
-            .write_u16::<BigEndian>(handshake_flags)?;
-        c.stream().borrow_mut().flush()?;
+        c.stream().write_u16::<BigEndian>(handshake_flags)?;
+        c.stream().flush()?;
 
         // Start reading client negotiation
         // option flags
-        let client_flags = c.stream().borrow_mut().read_u32::<BigEndian>()?;
+        let client_flags = c.stream().read_u32::<BigEndian>()?;
         println!("Received client flags: {:#02x}", client_flags);
         if client_flags != NBD_FLAG_C_FIXED_NEWSTYLE
             && client_flags != (NBD_FLAG_C_FIXED_NEWSTYLE | NBD_FLAG_C_NO_ZEROES)
@@ -144,7 +138,7 @@ where
 
         loop {
             // Check client magic
-            let client_magic = c.stream().borrow_mut().read_u64::<BigEndian>()?;
+            let client_magic = c.stream().read_u64::<BigEndian>()?;
             println!("Checking opts magic: {:#02x}", client_magic);
             if client_magic != NBD_OPTS_MAGIC {
                 eprintln!(
@@ -155,11 +149,11 @@ where
             }
 
             // Read option
-            let option = c.stream().borrow_mut().read_u32::<BigEndian>()?;
+            let option = c.stream().read_u32::<BigEndian>()?;
             println!("Checking option {:#02x}", option);
 
             // Read option length
-            let option_length = c.stream().borrow_mut().read_u32::<BigEndian>()?;
+            let option_length = c.stream().read_u32::<BigEndian>()?;
             println!("Received option length {}", option_length);
 
             // TODO: Remove later
@@ -167,70 +161,65 @@ where
 
             match option {
                 NbdOpt::Export => {
-                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::ExportName => {
                     println!("Received EXPORT_NAME option");
-                    c.stream()
-                        .borrow_mut()
-                        .write_u64::<BigEndian>(self.export.size)?;
+                    c.stream().write_u64::<BigEndian>(export.size)?;
 
                     // TODO use a sane way to initialize the flags
                     let mut flags: u16 = 0;
-                    set_flags(&self.export, &mut flags);
-                    c.stream().borrow_mut().write_u16::<BigEndian>(flags)?;
-                    c.stream().borrow_mut().flush()?;
+                    set_flags(&export, &mut flags);
+                    c.stream().write_u16::<BigEndian>(flags)?;
+                    c.stream().flush()?;
                 }
                 NbdOpt::List => {
-                    self.handle_list(c, &self.export.name, &self.export.description)?;
+                    Self::handle_list(c, &export.name, &export.description)?;
                 }
                 NbdOpt::Abort => {
                     println!("Aborting");
-                    if self
-                        .handshake_reply(c, option, NbdReply::Ack, EMPTY_REPLY)
-                        .is_err()
-                    {
+                    if Self::handshake_reply(c, option, NbdReply::Ack, EMPTY_REPLY).is_err() {
                         eprintln!("Ignoring abort ACK errors");
                     }
                     return Ok(InteractionResult::Abort);
                 }
                 NbdOpt::StructuredReply => {
-                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 opt @ NbdOpt::Info => {
                     println!("Received info");
-                    self.handle_export_info(c, opt)?;
+                    Self::handle_export_info(c, opt, export)?;
                 }
                 opt @ NbdOpt::Go => {
                     println!("Received go");
-                    self.handle_export_info(c, opt)?;
+                    Self::handle_export_info(c, opt, export)?;
                     return Ok(InteractionResult::Continue);
                 }
                 NbdOpt::ListMetaContext => {
-                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::SetMetaContext => {
-                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 NbdOpt::StartTls => {
-                    self.handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
             }
         }
     }
 
-    fn transmission(&self, c: &Client<T>) -> Result<InteractionResult> {
+    fn transmission(c: &mut Client<T>, export: &Export) -> Result<InteractionResult> {
         let mut opts = OpenOptions::new();
         opts.read(true);
-        if !self.export.read_only {
+        if !export.read_only {
             opts.write(true);
         }
 
-        let file = &opts.open(&self.export.path)?;
+        let file = &opts.open(&export.path)?;
 
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
         loop {
-            c.stream().borrow_mut().read_exact(&mut request_buf)?;
+            c.stream().read_exact(&mut request_buf)?;
 
             let request: Request = bincode::decode_from_slice(
                 &request_buf,
@@ -260,10 +249,10 @@ where
                     let mut buf: Vec<u8> = vec![0; request.len as usize];
                     let read = file.read_at(buf.as_mut_slice(), request.offset)?;
                     println!("Read {} bytes", read);
-                    self.transmission_simple_reply_header(c, request.handle, 0)?;
+                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
 
-                    c.stream().borrow_mut().write_all(&buf)?;
-                    c.stream().borrow_mut().flush()?;
+                    c.stream().write_all(&buf)?;
+                    c.stream().flush()?;
                 }
                 NbdCmd::Write => {
                     println!(
@@ -272,19 +261,19 @@ where
                     );
 
                     let mut buf: Vec<u8> = vec![0; request.len as usize];
-                    c.stream().borrow_mut().read_exact(buf.as_mut_slice())?;
+                    c.stream().read_exact(buf.as_mut_slice())?;
                     file.write_at(&buf, request.offset)?;
-                    self.transmission_simple_reply_header(c, request.handle, 0)?;
-                    c.stream().borrow_mut().flush()?;
+                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
+                    c.stream().flush()?;
                 }
                 NbdCmd::Disc => {
                     println!("Disconnect requested");
-                    c.stream().borrow_mut().flush()?;
+                    c.stream().flush()?;
                     return Ok(InteractionResult::Abort);
                 }
                 NbdCmd::Flush => {
                     println!("Received flush");
-                    c.stream().borrow_mut().flush()?;
+                    c.stream().flush()?;
                 }
                 NbdCmd::Trim => {
                     println!("trim!");
@@ -308,19 +297,19 @@ where
         Ok(())
     }
 
-    fn handle_export_info(&self, c: &Client<T>, opt: NbdOpt) -> Result<(), Box<dyn Error>> {
+    fn handle_export_info(c: &mut Client<T>, opt: NbdOpt, export: &Export) -> Result<(), Box<dyn Error>> {
         // Read name length
-        let len = c.stream().borrow_mut().read_u32::<BigEndian>()?;
+        let len = c.stream().read_u32::<BigEndian>()?;
         println!("Received length {}", len);
         let mut buf: Vec<u8> = vec![0; len as usize];
 
         // Read name
-        c.stream().borrow_mut().read_exact(buf.as_mut_slice())?;
+        c.stream().read_exact(buf.as_mut_slice())?;
         let export_name = String::from_utf8(buf.clone())?;
         println!("Received export name {}", export_name);
 
         // Read number of requests
-        let requests = c.stream().borrow_mut().read_u16::<BigEndian>()?;
+        let requests = c.stream().read_u16::<BigEndian>()?;
         println!("Receiving {} request(s)", requests);
 
         let mut send_name = false;
@@ -328,7 +317,7 @@ where
 
         for i in 0..requests {
             // TODO use proper safe conversion
-            let option = unsafe { transmute(c.stream().borrow_mut().read_u16::<BigEndian>()?) };
+            let option = unsafe { transmute(c.stream().read_u16::<BigEndian>()?) };
             println!("Request {}/{}, option {:?}", i + 1, requests, option);
 
             match option {
@@ -353,34 +342,34 @@ where
         }
 
         if send_name {
-            self.info_reply(
+            Self::info_reply(
                 c,
                 opt,
                 NbdInfoOpt::Name,
-                (self.export.name.len() + 2) as u32,
-                self.export.name.as_bytes(),
+                (export.name.len() + 2) as u32,
+                export.name.as_bytes(),
             )?;
         }
 
         if send_description {
-            self.info_reply(
+            Self::info_reply(
                 c,
                 opt,
                 NbdInfoOpt::Description,
-                (self.export.description.len() + 2) as u32,
-                self.export.description.as_bytes(),
+                (export.description.len() + 2) as u32,
+                export.description.as_bytes(),
             )?;
         }
 
         let sizes: Vec<u32> = vec![
             MIN_BLOCK_SIZE as u32,
             PREFERRED_BLOCK_SIZE as u32,
-            std::cmp::min(self.export.size, MAX_BLOCK_SIZE) as u32,
+            std::cmp::min(export.size, MAX_BLOCK_SIZE) as u32,
         ];
 
         println!("Reporting sizes {:?}", sizes);
 
-        self.info_reply(
+        Self::info_reply(
             c,
             opt,
             NbdInfoOpt::BlockSize,
@@ -392,32 +381,25 @@ where
         )?;
 
         let mut flags: u16 = 0;
-        set_flags(&self.export, &mut flags);
+        set_flags(export, &mut flags);
 
         println!(
             "Sending export '{}' information, flags {}",
-            self.export.name, flags
+            export.name, flags
         );
-        self.info_reply(c, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
+        Self::info_reply(c, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
 
-        c.stream()
-            .borrow_mut()
-            .write_all(&self.export.size.to_be_bytes())?;
-        c.stream().borrow_mut().write_all(&flags.to_be_bytes())?;
-        c.stream().borrow_mut().flush()?;
+        c.stream().write_all(&export.size.to_be_bytes())?;
+        c.stream().write_all(&flags.to_be_bytes())?;
+        c.stream().flush()?;
 
-        self.handshake_reply(c, opt, NbdReply::Ack, EMPTY_REPLY)?;
+        Self::handshake_reply(c, opt, NbdReply::Ack, EMPTY_REPLY)?;
 
         Ok(())
     }
 
     // TODO: support multiple (and actual) exports
-    fn handle_list(
-        &self,
-        c: &Client<T>,
-        name: &str,
-        description: &str,
-    ) -> Result<(), Box<dyn Error>> {
+    fn handle_list(c: &mut Client<T>, name: &str, description: &str) -> Result<(), Box<dyn Error>> {
         let reply_header = OptionReply {
             magic: NBD_REP_MAGIC,
             option: (NbdOpt::List as u32),
@@ -427,22 +409,19 @@ where
             length: (name.len() as u32 + description.len() as u32 + 4),
         };
 
-        self.header_reply(c, reply_header)?;
-        c.stream()
-            .borrow_mut()
-            .write_all(&(name.len() as u32).to_be_bytes())?;
-        c.stream().borrow_mut().write_all(name.as_bytes())?;
-        c.stream().borrow_mut().write_all(description.as_bytes())?;
-        c.stream().borrow_mut().flush()?;
+        Self::header_reply(c, reply_header)?;
+        c.stream().write_all(&(name.len() as u32).to_be_bytes())?;
+        c.stream().write_all(name.as_bytes())?;
+        c.stream().write_all(description.as_bytes())?;
+        c.stream().flush()?;
 
-        self.handshake_reply(c, NbdOpt::List, NbdReply::Ack, EMPTY_REPLY)?;
+        Self::handshake_reply(c, NbdOpt::List, NbdReply::Ack, EMPTY_REPLY)?;
 
         Ok(())
     }
 
     fn info_reply(
-        &self,
-        c: &Client<T>,
+        c: &mut Client<T>,
         opt: NbdOpt,
         info_type: NbdInfoOpt,
         len: u32,
@@ -455,26 +434,24 @@ where
             length: len,
         };
 
-        c.stream().borrow_mut().write_all(&bincode::encode_to_vec(
+        c.stream().write_all(&bincode::encode_to_vec(
             &header,
             Configuration::standard()
                 .with_big_endian()
                 .with_fixed_int_encoding(),
         )?)?;
-        c.stream()
-            .borrow_mut()
-            .write_u16::<BigEndian>(info_type as u16)?;
+        c.stream().write_u16::<BigEndian>(info_type as u16)?;
 
         // Send payload
         if data != EMPTY_REPLY {
-            c.stream().borrow_mut().write_all(data)?;
+            c.stream().write_all(data)?;
         }
-        c.stream().borrow_mut().flush()?;
+        c.stream().flush()?;
 
         Ok(())
     }
 
-    fn header_reply(&self, c: &Client<T>, header: OptionReply) -> Result<(), Box<dyn Error>> {
+    fn header_reply(c: &mut Client<T>, header: OptionReply) -> Result<(), Box<dyn Error>> {
         let serialized = bincode::encode_to_vec(
             &header,
             Configuration::standard()
@@ -482,48 +459,32 @@ where
                 .with_fixed_int_encoding(),
         )?;
         dbg!(&serialized);
-        c.stream().borrow_mut().write_all(&serialized)?;
-        c.stream().borrow_mut().flush()?;
+        c.stream().write_all(&serialized)?;
+        c.stream().flush()?;
 
         Ok(())
     }
 
     fn handshake_reply(
-        &self,
-        c: &Client<T>,
+        c: &mut Client<T>,
         client_option: NbdOpt,
         reply_type: NbdReply,
         data: &[u8],
     ) -> Result<(), Box<dyn Error>> {
-        c.stream()
-            .borrow_mut()
-            .write_u64::<BigEndian>(NBD_REP_MAGIC)?;
-        c.stream()
-            .borrow_mut()
-            .write_u32::<BigEndian>(client_option as u32)?;
-        c.stream()
-            .borrow_mut()
-            .write_u32::<BigEndian>(reply_type as u32)?;
-        c.stream()
-            .borrow_mut()
-            .write_u32::<BigEndian>(data.len() as u32)?;
-        c.stream().borrow_mut().write_all(data)?;
-        c.stream().borrow_mut().flush()?;
+        c.stream().write_u64::<BigEndian>(NBD_REP_MAGIC)?;
+        c.stream().write_u32::<BigEndian>(client_option as u32)?;
+        c.stream().write_u32::<BigEndian>(reply_type as u32)?;
+        c.stream().write_u32::<BigEndian>(data.len() as u32)?;
+        c.stream().write_all(data)?;
+        c.stream().flush()?;
 
         Ok(())
     }
 
-    fn transmission_simple_reply_header(
-        &self,
-        c: &Client<T>,
-        handle: u64,
-        error: u32,
-    ) -> Result<()> {
-        c.stream()
-            .borrow_mut()
-            .write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
-        c.stream().borrow_mut().write_u32::<BigEndian>(error)?;
-        c.stream().borrow_mut().write_u64::<BigEndian>(handle)?;
+    fn transmission_simple_reply_header(c: &mut Client<T>, handle: u64, error: u32) -> Result<()> {
+        c.stream().write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
+        c.stream().write_u32::<BigEndian>(error)?;
+        c.stream().write_u64::<BigEndian>(handle)?;
 
         Ok(())
     }
