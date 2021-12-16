@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.51"
-bincode = "2.0.0-alpha.1"
+bincode = "2.0.0-alpha.2"
 byteorder = "1.4.3"
-clap = { version = "3.0.0-rc.4", features = ["derive"] }
+clap = { version = "3.0.0-rc.6", features = ["derive"] }
 thiserror = "1.0.30"
