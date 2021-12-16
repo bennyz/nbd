@@ -125,6 +125,7 @@ where
             }
         }
 
+        println!("Starting transmission");
         while let Ok(res) = Self::transmission(&mut client, &self.export) {
             match res {
                 InteractionResult::Abort => {
