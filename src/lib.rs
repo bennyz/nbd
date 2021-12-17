@@ -8,7 +8,6 @@ use consts::{
 };
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Debug;
 use std::fs::{self, OpenOptions};
 use std::intrinsics::transmute;
@@ -63,7 +62,7 @@ impl Export {
         let path = Path::new(&self.path);
         let md = fs::metadata(path)?;
         self.size = md.size();
-        println!("md size {}", self.size);
+
         Ok(())
     }
 }
@@ -105,15 +104,15 @@ where
         Server { clients, export }
     }
 
-    pub fn handle(&self, c: Client<T>) -> Result<(), anyhow::Error> {
+    pub fn handle(&self, c: Client<T>) -> Result<()> {
         let addr = c.addr().to_owned();
         println!("Handling client {}", addr);
-        self.add_connection(c).unwrap();
+        self.add_connection(c)?;
 
-        match self.handshake(&addr, &self.export).unwrap() {
+        match self.handshake(&addr, &self.export)? {
             InteractionResult::Abort => {
                 println!("Aborting connection");
-                self.remove_connection(&addr).unwrap();
+                self.remove_connection(&addr)?;
                 return Ok(());
             }
             InteractionResult::Continue => {
@@ -125,7 +124,7 @@ where
         match self.transmission(&addr, &self.export)? {
             InteractionResult::Abort => {
                 println!("Aborting connection");
-                self.remove_connection(&addr).unwrap();
+                self.remove_connection(&addr)?;
                 return Ok(());
             }
             InteractionResult::Continue => {
@@ -140,7 +139,7 @@ where
         &self,
         client_addr: &str,
         export: &Export,
-    ) -> Result<InteractionResult, Box<dyn Error>> {
+    ) -> Result<InteractionResult> {
         let mut client_guard = self.clients.write().unwrap();
         let c = client_guard.get_mut(client_addr).unwrap();
 
@@ -332,7 +331,7 @@ where
         }
     }
 
-    fn add_connection(&self, client: Client<T>) -> Result<(), Box<dyn Error>> {
+    fn add_connection(&self, client: Client<T>) -> Result<()> {
         self.clients
             .write()
             .unwrap()
@@ -341,7 +340,7 @@ where
         Ok(())
     }
 
-    fn remove_connection(&self, addr: &str) -> Result<(), Box<dyn Error>> {
+    fn remove_connection(&self, addr: &str) -> Result<()> {
         self.clients.write().unwrap().remove(addr);
 
         Ok(())
@@ -351,7 +350,7 @@ where
         c: &mut Client<T>,
         opt: NbdOpt,
         export: &Export,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         // Read name length
         let len = c.stream().read_u32::<BigEndian>()?;
         println!("Received length {}", len);
@@ -453,7 +452,7 @@ where
     }
 
     // TODO: support multiple (and actual) exports
-    fn handle_list(c: &mut Client<T>, name: &str, description: &str) -> Result<(), Box<dyn Error>> {
+    fn handle_list(c: &mut Client<T>, name: &str, description: &str) -> Result<()> {
         let reply_header = OptionReply {
             magic: NBD_REP_MAGIC,
             option: (NbdOpt::List as u32),
@@ -480,7 +479,7 @@ where
         info_type: NbdInfoOpt,
         len: u32,
         data: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let header = OptionReply {
             magic: NBD_REP_MAGIC,
             option: (opt as u32),
@@ -505,14 +504,14 @@ where
         Ok(())
     }
 
-    fn header_reply(c: &mut Client<T>, header: OptionReply) -> Result<(), Box<dyn Error>> {
+    fn header_reply(c: &mut Client<T>, header: OptionReply) -> Result<()> {
         let serialized = bincode::encode_to_vec(
             &header,
             Configuration::standard()
                 .with_big_endian()
                 .with_fixed_int_encoding(),
         )?;
-        dbg!(&serialized);
+
         c.stream().write_all(&serialized)?;
         c.stream().flush()?;
 
@@ -524,7 +523,7 @@ where
         client_option: NbdOpt,
         reply_type: NbdReply,
         data: &[u8],
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         c.stream().write_u64::<BigEndian>(NBD_REP_MAGIC)?;
         c.stream().write_u32::<BigEndian>(client_option as u32)?;
         c.stream().write_u32::<BigEndian>(reply_type as u32)?;
