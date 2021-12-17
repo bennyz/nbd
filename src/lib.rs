@@ -256,7 +256,7 @@ where
                 Configuration::standard()
                     .with_big_endian()
                     .with_fixed_int_encoding(),
-            )?;
+            )?.0;
 
             println!("Checking opts magic: {:?}", request.magic);
             if request.magic != NBD_REQUEST_MAGIC {
