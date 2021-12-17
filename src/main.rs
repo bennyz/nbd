@@ -3,7 +3,7 @@ use nbd::client::Client;
 use nbd::{self, Export, Server};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::thread;
 
 #[derive(Parser, Clone)]
@@ -34,7 +34,7 @@ fn main() {
     };
 
     export.init_export().unwrap();
-    let server: Arc<RwLock<Server<TcpStream>>> = Arc::new(RwLock::new(nbd::Server::new(export)));
+    let server: Arc<Server<TcpStream>> = Arc::new(nbd::Server::new(export));
 
     let listener =
         TcpListener::bind(format!("127.0.0.1:{}", nbd::consts::NBD_DEFAULT_PORT)).unwrap();
@@ -45,7 +45,7 @@ fn main() {
                 let client = Client::new(stream, client_addr);
                 let clone = Arc::clone(&server);
                 thread::spawn(move || {
-                    clone.write().unwrap().handle(client).unwrap();
+                    clone.handle(client).unwrap();
                 });
             }
             Err(e) => {

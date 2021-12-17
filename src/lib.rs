@@ -15,6 +15,7 @@ use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
 use std::path::Path;
+use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
 
@@ -91,7 +92,7 @@ struct Request {
 
 #[derive(Debug, Default)]
 pub struct Server<T: Read + Write> {
-    clients: HashMap<String, Client<T>>,
+    clients: Arc<RwLock<HashMap<String, Client<T>>>>,
     export: Export,
 }
 
@@ -100,18 +101,16 @@ where
     T: Read + Write,
 {
     pub fn new(export: Export) -> Self {
-        let clients = HashMap::new();
+        let clients = Arc::new(RwLock::new(HashMap::new()));
         Server { clients, export }
     }
 
-    pub fn handle(&mut self, c: Client<T>) -> Result<(), anyhow::Error> {
+    pub fn handle(&self, c: Client<T>) -> Result<(), anyhow::Error> {
         let addr = c.addr().to_owned();
-        println!("handling client {}", addr);
+        println!("Handling client {}", addr);
         self.add_connection(c).unwrap();
 
-        let mut client = self.clients.get_mut(&addr).unwrap();
-
-        match Self::handshake(&mut client, &self.export).unwrap() {
+        match self.handshake(&addr, &self.export).unwrap() {
             InteractionResult::Abort => {
                 println!("Aborting connection");
                 self.remove_connection(&addr).unwrap();
@@ -123,7 +122,7 @@ where
         }
 
         println!("Starting transmission");
-        match Self::transmission(&mut client, &self.export)? {
+        match self.transmission(&addr, &self.export)? {
             InteractionResult::Abort => {
                 println!("Aborting connection");
                 self.remove_connection(&addr).unwrap();
@@ -137,7 +136,14 @@ where
         Ok(())
     }
 
-    fn handshake(c: &mut Client<T>, export: &Export) -> Result<InteractionResult, Box<dyn Error>> {
+    fn handshake(
+        &self,
+        client_addr: &str,
+        export: &Export,
+    ) -> Result<InteractionResult, Box<dyn Error>> {
+        let mut client_guard = self.clients.write().unwrap();
+        let c = client_guard.get_mut(client_addr).unwrap();
+
         // 64 bits
         c.stream().write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
 
@@ -232,8 +238,10 @@ where
         }
     }
 
-    fn transmission(c: &mut Client<T>, export: &Export) -> Result<InteractionResult> {
-        println!("transmission for client {}", c.addr());
+    fn transmission(&self, client_addr: &str, export: &Export) -> Result<InteractionResult> {
+        let mut client_guard = self.clients.write().unwrap();
+        let c = client_guard.get_mut(client_addr).unwrap();
+
         println!("Opening export file {}", export.path);
         let mut opts = OpenOptions::new();
         opts.read(true);
@@ -324,14 +332,17 @@ where
         }
     }
 
-    fn add_connection(&mut self, client: Client<T>) -> Result<(), Box<dyn Error>> {
-        self.clients.insert(client.addr().to_owned(), client);
+    fn add_connection(&self, client: Client<T>) -> Result<(), Box<dyn Error>> {
+        self.clients
+            .write()
+            .unwrap()
+            .insert(client.addr().to_owned(), client);
 
         Ok(())
     }
 
-    fn remove_connection(&mut self, addr: &str) -> Result<(), Box<dyn Error>> {
-        self.clients.remove(addr);
+    fn remove_connection(&self, addr: &str) -> Result<(), Box<dyn Error>> {
+        self.clients.write().unwrap().remove(addr);
 
         Ok(())
     }
