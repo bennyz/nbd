@@ -40,3 +40,9 @@ impl<T: Read + Write> Read for Client<T> {
         self.stream.read(buf)
     }
 }
+
+impl<T: Read + Write> Drop for Client<T> {
+    fn drop(&mut self) {
+        println!("Client {} disconnected", self.addr);
+    }
+}
