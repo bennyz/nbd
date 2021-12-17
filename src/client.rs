@@ -23,6 +23,14 @@ impl<T: Read + Write> Client<T> {
     pub fn stream(&mut self) -> &mut T {
         &mut self.stream
     }
+
+    pub fn set_structured_reply(&mut self, value: bool) {
+        self.structured_reply = value;
+    }
+
+    pub fn structured_reply(&self) -> bool {
+        self.structured_reply
+    }
 }
 
 impl<T: Read + Write> Write for Client<T> {

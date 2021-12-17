@@ -9,7 +9,7 @@ use consts::{
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
@@ -41,7 +41,7 @@ pub enum InteractionResult {
     Continue,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Export {
     pub path: String,
     pub name: String,
@@ -135,11 +135,7 @@ where
         Ok(())
     }
 
-    fn handshake(
-        &self,
-        client_addr: &str,
-        export: &Export,
-    ) -> Result<InteractionResult> {
+    fn handshake(&self, client_addr: &str, export: &Export) -> Result<InteractionResult> {
         let mut client_guard = self.clients.write().unwrap();
         let c = client_guard.get_mut(client_addr).unwrap();
 
@@ -213,6 +209,7 @@ where
                     return Ok(InteractionResult::Abort);
                 }
                 NbdOpt::StructuredReply => {
+                    c.set_structured_reply(true);
                     Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
                 }
                 opt @ NbdOpt::Info => {
@@ -251,6 +248,7 @@ where
         let file = &opts.open(&export.path)?;
 
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
+        let file_guard = RwLock::new(file);
         loop {
             let read = c.stream().read(&mut request_buf)?;
             println!("Read {} bytes", read);
@@ -285,14 +283,13 @@ where
                         "Received read request, len {}, offset {}",
                         request.len, request.offset
                     );
-
-                    let mut buf: Vec<u8> = vec![0; request.len as usize];
-                    let read = file.read_at(buf.as_mut_slice(), request.offset)?;
-                    println!("Read {} bytes", read);
-                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
-
-                    c.stream().write_all(&buf)?;
-                    c.stream().flush()?;
+                    self.do_read(
+                        c,
+                        request.handle,
+                        request.offset,
+                        request.len,
+                        &file_guard.read().unwrap(),
+                    )?;
                 }
                 NbdCmd::Write => {
                     println!(
@@ -300,11 +297,13 @@ where
                         request.len, request.offset
                     );
 
-                    let mut buf: Vec<u8> = vec![0; request.len as usize];
-                    c.stream().read_exact(buf.as_mut_slice())?;
-                    file.write_at(&buf, request.offset)?;
-                    Self::transmission_simple_reply_header(c, request.handle, 0)?;
-                    c.stream().flush()?;
+                    self.do_write(
+                        c,
+                        request.handle,
+                        request.offset,
+                        request.len,
+                        &file_guard.write().unwrap(),
+                    )?;
                 }
                 NbdCmd::Disc => {
                     println!("Disconnect requested");
@@ -331,26 +330,7 @@ where
         }
     }
 
-    fn add_connection(&self, client: Client<T>) -> Result<()> {
-        self.clients
-            .write()
-            .unwrap()
-            .insert(client.addr().to_owned(), client);
-
-        Ok(())
-    }
-
-    fn remove_connection(&self, addr: &str) -> Result<()> {
-        self.clients.write().unwrap().remove(addr);
-
-        Ok(())
-    }
-
-    fn handle_export_info(
-        c: &mut Client<T>,
-        opt: NbdOpt,
-        export: &Export,
-    ) -> Result<()> {
+    fn handle_export_info(c: &mut Client<T>, opt: NbdOpt, export: &Export) -> Result<()> {
         // Read name length
         let len = c.stream().read_u32::<BigEndian>()?;
         println!("Received length {}", len);
@@ -538,6 +518,56 @@ where
         c.stream().write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
         c.stream().write_u32::<BigEndian>(error)?;
         c.stream().write_u64::<BigEndian>(handle)?;
+
+        Ok(())
+    }
+
+    fn do_read(
+        &self,
+        c: &mut Client<T>,
+        handle: u64,
+        offset: u64,
+        len: u32,
+        file: &File,
+    ) -> Result<()> {
+        let mut buf: Vec<u8> = vec![0; len as usize];
+        let read = file.read_at(buf.as_mut_slice(), offset)?;
+        println!("Read {} bytes", read);
+        Self::transmission_simple_reply_header(c, handle, 0)?;
+
+        c.stream().write_all(&buf)?;
+        c.stream().flush()?;
+        Ok(())
+    }
+
+    fn do_write(
+        &self,
+        c: &mut Client<T>,
+        handle: u64,
+        offset: u64,
+        len: u32,
+        file: &File,
+    ) -> Result<()> {
+        let mut buf: Vec<u8> = vec![0; len as usize];
+        c.stream().read_exact(buf.as_mut_slice())?;
+        file.write_at(&buf, offset)?;
+        Self::transmission_simple_reply_header(c, handle, 0)?;
+        c.stream().flush()?;
+
+        Ok(())
+    }
+
+    fn add_connection(&self, client: Client<T>) -> Result<()> {
+        self.clients
+            .write()
+            .unwrap()
+            .insert(client.addr().to_owned(), client);
+
+        Ok(())
+    }
+
+    fn remove_connection(&self, addr: &str) -> Result<()> {
+        self.clients.write().unwrap().remove(addr);
 
         Ok(())
     }
