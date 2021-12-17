@@ -3,6 +3,8 @@ use nbd::client::Client;
 use nbd::{self, Export, Server};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
+use std::sync::{Arc, RwLock};
+use std::thread;
 
 #[derive(Parser, Clone)]
 #[clap(version = "0.0.1")]
@@ -23,7 +25,7 @@ fn main() {
         panic!("{} does not exist!", args.file);
     }
 
-    let export = Export {
+    let mut export = Export {
         name: args.name,
         description: args.description,
         path: args.file,
@@ -31,7 +33,8 @@ fn main() {
         ..Default::default()
     };
 
-    let mut server: Server<TcpStream> = nbd::Server::new(export);
+    export.init_export().unwrap();
+    let server: Arc<RwLock<Server<TcpStream>>> = Arc::new(RwLock::new(nbd::Server::new(export)));
 
     let listener =
         TcpListener::bind(format!("127.0.0.1:{}", nbd::consts::NBD_DEFAULT_PORT)).unwrap();
@@ -40,7 +43,10 @@ fn main() {
             Ok(stream) => {
                 let client_addr = stream.peer_addr().unwrap().to_string();
                 let client = Client::new(stream, client_addr);
-                server.handle(client).unwrap();
+                let clone = Arc::clone(&server);
+                thread::spawn(move || {
+                    clone.write().unwrap().handle(client).unwrap();
+                });
             }
             Err(e) => {
                 eprintln!("error: {}", e)

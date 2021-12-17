@@ -58,7 +58,7 @@ pub struct Export {
 }
 
 impl Export {
-    pub fn init_export(&mut self) -> Result<(), anyhow::Error> {
+    pub fn init_export(&mut self) -> Result<()> {
         let path = Path::new(&self.path);
         let md = fs::metadata(path)?;
         self.size = md.size();
@@ -105,38 +105,32 @@ where
     }
 
     pub fn handle(&mut self, c: Client<T>) -> Result<(), anyhow::Error> {
-        self.export.init_export().unwrap();
         let addr = c.addr().to_owned();
+        println!("handling client {}", addr);
         self.add_connection(c).unwrap();
 
         let mut client = self.clients.get_mut(&addr).unwrap();
 
-        while let Ok(res) = Self::handshake(&mut client, &self.export) {
-            match res {
-                InteractionResult::Abort => {
-                    println!("Aborting connection");
-                    self.remove_connection(&addr).unwrap();
-                    return Ok(());
-                }
-                InteractionResult::Continue => {
-                    println!("Continuing connection");
-                    break;
-                }
+        match Self::handshake(&mut client, &self.export).unwrap() {
+            InteractionResult::Abort => {
+                println!("Aborting connection");
+                self.remove_connection(&addr).unwrap();
+                return Ok(());
+            }
+            InteractionResult::Continue => {
+                println!("Continuing connection");
             }
         }
 
         println!("Starting transmission");
-        while let Ok(res) = Self::transmission(&mut client, &self.export) {
-            match res {
-                InteractionResult::Abort => {
-                    println!("Aborting connection");
-                    self.remove_connection(&addr).unwrap();
-                    return Ok(());
-                }
-                InteractionResult::Continue => {
-                    println!("Continuing connection");
-                    break;
-                }
+        match Self::transmission(&mut client, &self.export)? {
+            InteractionResult::Abort => {
+                println!("Aborting connection");
+                self.remove_connection(&addr).unwrap();
+                return Ok(());
+            }
+            InteractionResult::Continue => {
+                println!("Continuing connection");
             }
         }
 
@@ -239,6 +233,8 @@ where
     }
 
     fn transmission(c: &mut Client<T>, export: &Export) -> Result<InteractionResult> {
+        println!("transmission for client {}", c.addr());
+        println!("Opening export file {}", export.path);
         let mut opts = OpenOptions::new();
         opts.read(true);
         if !export.read_only {
@@ -249,14 +245,21 @@ where
 
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
         loop {
-            c.stream().read_exact(&mut request_buf)?;
+            let read = c.stream().read(&mut request_buf)?;
+            println!("Read {} bytes", read);
+
+            if (read as u32) < NBD_REQUEST_SIZE {
+                eprintln!("Invalid request size");
+                return Ok(InteractionResult::Abort);
+            }
 
             let request: Request = bincode::decode_from_slice(
                 &request_buf,
                 Configuration::standard()
                     .with_big_endian()
                     .with_fixed_int_encoding(),
-            )?.0;
+            )?
+            .0;
 
             println!("Checking opts magic: {:?}", request.magic);
             if request.magic != NBD_REQUEST_MAGIC {
@@ -265,7 +268,7 @@ where
                     request.magic, NBD_REQUEST_MAGIC
                 );
 
-                return Err(anyhow::anyhow!(NbdError::BadMagic(request.magic as usize)));
+                continue;
             }
 
             let cmd: NbdCmd = unsafe { transmute(request.command_type) };
