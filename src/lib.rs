@@ -41,29 +41,42 @@ pub enum InteractionResult {
     Continue,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Export {
-    pub path: String,
-    pub name: String,
-    pub description: String,
-    pub size: u64,
-    pub read_only: bool,
-    pub can_resize: bool,
-    pub fast_zero: bool,
-    pub trim: bool,
-    pub flush: bool,
-    pub rotational: bool,
-    pub df: bool,
-    pub multiconn: bool,
+    path: String,
+    name: String,
+    description: String,
+    size: u64,
+    read_only: bool,
+    can_resize: bool,
+    fast_zero: bool,
+    trim: bool,
+    flush: bool,
+    rotational: bool,
+    df: bool,
+    multiconn: bool,
 }
 
 impl Export {
-    pub fn init_export(&mut self) -> Result<()> {
-        let path = Path::new(&self.path);
-        let md = fs::metadata(path)?;
-        self.size = md.size();
+    pub fn init_export(path: String, name: String, description: String) -> Result<Export> {
+        let md = fs::metadata(Path::new(&path))?;
 
-        Ok(())
+        let export = Export {
+            path,
+            name,
+            description,
+            size: md.size(),
+            read_only: false, // TODO make configurable
+            can_resize: false,
+            fast_zero: false,
+            trim: false,
+            flush: false,
+            rotational: false,
+            df: false,
+            multiconn: true,
+        };
+
+        Ok(export)
     }
 }
 
@@ -89,7 +102,7 @@ struct Request {
     len: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Server<T: Read + Write> {
     clients: Arc<RwLock<HashMap<String, Client<T>>>>,
     export: Export,
