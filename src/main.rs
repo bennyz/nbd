@@ -76,7 +76,7 @@ fn main() {
     }
 
     // Make backends for each export selectable
-    println!("Starting tcp server");
+    println!("Listening on port {}", nbd::consts::NBD_DEFAULT_PORT);
     let clone = &Arc::clone(&export);
     let export = clone.read().unwrap();
 
