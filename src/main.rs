@@ -11,15 +11,19 @@ use std::thread::{self, JoinHandle};
 #[derive(Parser, Clone)]
 #[clap(version = "0.0.1")]
 struct Args {
-    /// Sets a custom config file. Could have been an Option<T> with no default too
+    /// The file we want to export
     file: String,
 
+    /// The name of the export, empty by default
     #[clap(default_value = "")]
     name: String,
 
+    /// The description of the export, empty by default
     #[clap(default_value = "")]
     description: String,
 
+    /// Whether to use a UNIX socket (additionally) along with the TCP socket
+    /// by default uses /tmp/nbd.sock, in the future it will be configurable
     #[clap(long)]
     unix: bool,
 }
