@@ -10,7 +10,7 @@ However, it is capable of doing things:
 ```shell
 # Clone the project
 $ git clone https://github.com/bennyz/nbd.git
-$   cd nbd/
+$ cd nbd/
 
 # Build it
 $ cargo build --release
@@ -34,7 +34,7 @@ OPTIONS:
 
 ## Examples
 
-Note: These example rely on third-party client, like `qemu-img`, projects from `nbdkit` and `nbd-client`
+Note: These example rely on third-party clients, like `qemu-img`, projects from `nbdkit` (`nbdinfo`) and `nbd-client`
 
 ```shell
 $ qemu-img create -f raw export-file 1G
@@ -83,6 +83,7 @@ Warning: the oldstyle protocol is no longer supported.
 This method now uses the newstyle protocol with a default export
 Negotiation: ..size = 1024MB
 Connected /dev/nbd0
+
 # Now our export is available via /dev/nbd0
 # Let's create an XFS filesystem on it!
 $ sudo mkfs.xfs /dev/nbd0
