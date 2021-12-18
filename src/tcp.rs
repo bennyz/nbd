@@ -1,6 +1,6 @@
 use std::{
     io,
-    net::{SocketAddr, TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener},
     sync::{self, atomic::AtomicBool, Arc},
     thread::{self, sleep, JoinHandle},
     time::Duration,
@@ -10,7 +10,7 @@ use crate::{client::Client, Export, Server};
 use anyhow::Result;
 
 pub fn start_tcp_server(export: &Export, address: SocketAddr, stop: &AtomicBool) -> Result<()> {
-    let server: Arc<Server<TcpStream>> = Arc::new(Server::new(export.clone()));
+    let server: Arc<Server> = Arc::new(Server::new(export.clone()));
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     let listener = TcpListener::bind(address)?;
     listener.set_nonblocking(true)?;
@@ -24,10 +24,10 @@ pub fn start_tcp_server(export: &Export, address: SocketAddr, stop: &AtomicBool)
         match conn {
             Ok(stream) => {
                 let client_addr = stream.peer_addr().unwrap().to_string();
-                let client = Client::new(stream, client_addr);
+                let mut client = Client::new(stream, client_addr);
                 let clone = Arc::clone(&server);
                 let join_handle = thread::spawn(move || {
-                    clone.handle(client).unwrap();
+                    clone.handle(&mut client).unwrap();
                 });
 
                 handles.push(join_handle);

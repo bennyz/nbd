@@ -3,10 +3,7 @@ use anyhow::Result;
 
 use std::{
     io,
-    os::unix::{
-        net::{UnixListener, UnixStream},
-        prelude::AsRawFd,
-    },
+    os::unix::{net::UnixListener, prelude::AsRawFd},
     path::Path,
     sync::{self, atomic::AtomicBool, Arc},
     thread::{self, sleep, JoinHandle},
@@ -14,7 +11,7 @@ use std::{
 };
 
 pub fn start_unix_socket_server(export: &Export, path: &Path, stop: &AtomicBool) -> Result<()> {
-    let server: Arc<Server<UnixStream>> = Arc::new(Server::new(export.clone()));
+    let server: Arc<Server> = Arc::new(Server::new(export.clone()));
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     let listener = UnixListener::bind(path)?;
     listener.set_nonblocking(true)?;
@@ -28,10 +25,10 @@ pub fn start_unix_socket_server(export: &Export, path: &Path, stop: &AtomicBool)
         match conn {
             Ok(stream) => {
                 let fd = &stream.as_raw_fd();
-                let client = Client::new(stream, format!("unix-sock-{}", fd));
+                let mut client = Client::new(stream, format!("unix-sock-{}", fd));
                 let clone = Arc::clone(&server);
                 handles.push(thread::spawn(move || {
-                    clone.handle(client).unwrap();
+                    clone.handle(&mut client).unwrap();
                 }));
             }
             Err(e) => {
