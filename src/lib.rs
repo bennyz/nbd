@@ -7,14 +7,12 @@ use consts::{
     NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
 };
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self, File, OpenOptions};
 use std::intrinsics::transmute;
 use std::io::{Read, Write};
 use std::os::unix::prelude::{FileExt, MetadataExt};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
 
@@ -105,29 +103,22 @@ struct Request {
 }
 
 #[derive(Debug)]
-pub struct Server<T: Read + Write> {
-    clients: Arc<RwLock<HashMap<String, Client<T>>>>,
+pub struct Server {
     export: Export,
 }
 
-impl<T> Server<T>
-where
-    T: Read + Write,
-{
+impl Server {
     pub fn new(export: Export) -> Self {
-        let clients = Arc::new(RwLock::new(HashMap::new()));
-        Server { clients, export }
+        Server { export }
     }
 
-    pub fn handle(&self, c: Client<T>) -> Result<()> {
+    pub fn handle<T: Read + Write>(&self, c: &mut Client<T>) -> Result<()> {
         let addr = c.addr().to_owned();
         println!("Handling client {}", addr);
-        self.add_connection(c)?;
 
-        match self.handshake(&addr, &self.export)? {
+        match self.handshake(c, &self.export)? {
             InteractionResult::Abort => {
                 println!("Aborting connection");
-                self.remove_connection(&addr)?;
                 return Ok(());
             }
             InteractionResult::Continue => {
@@ -136,10 +127,9 @@ where
         }
 
         println!("Starting transmission");
-        match self.transmission(&addr, &self.export)? {
+        match self.transmission(c, &self.export)? {
             InteractionResult::Abort => {
                 println!("Aborting connection");
-                self.remove_connection(&addr)?;
                 return Ok(());
             }
             InteractionResult::Continue => {
@@ -150,10 +140,11 @@ where
         Ok(())
     }
 
-    fn handshake(&self, client_addr: &str, export: &Export) -> Result<InteractionResult> {
-        let mut client_guard = self.clients.write().unwrap();
-        let c = client_guard.get_mut(client_addr).unwrap();
-
+    fn handshake<T: Read + Write>(
+        &self,
+        c: &mut Client<T>,
+        export: &Export,
+    ) -> Result<InteractionResult> {
         // 64 bits
         c.stream().write_all(&NBD_INIT_MAGIC.to_be_bytes())?;
 
@@ -249,10 +240,11 @@ where
         }
     }
 
-    fn transmission(&self, client_addr: &str, export: &Export) -> Result<InteractionResult> {
-        let mut client_guard = self.clients.write().unwrap();
-        let c = client_guard.get_mut(client_addr).unwrap();
-
+    fn transmission<T: Read + Write>(
+        &self,
+        c: &mut Client<T>,
+        export: &Export,
+    ) -> Result<InteractionResult> {
         println!("Opening export file {}", export.path);
         let mut opts = OpenOptions::new();
         opts.read(true);
@@ -263,7 +255,6 @@ where
         let file = &opts.open(&export.path)?;
 
         let mut request_buf: [u8; NBD_REQUEST_SIZE as usize] = [0; NBD_REQUEST_SIZE as usize];
-        let file_guard = RwLock::new(file);
         loop {
             let read = c.stream().read(&mut request_buf)?;
             println!("Read {} bytes", read);
@@ -303,7 +294,7 @@ where
                         request.handle,
                         request.offset,
                         request.len,
-                        &file_guard.read().unwrap(),
+                        &file,
                     )?;
                 }
                 NbdCmd::Write => {
@@ -317,7 +308,7 @@ where
                         request.handle,
                         request.offset,
                         request.len,
-                        &file_guard.write().unwrap(),
+                        &file,
                     )?;
                 }
                 NbdCmd::Disc => {
@@ -345,7 +336,11 @@ where
         }
     }
 
-    fn handle_export_info(c: &mut Client<T>, opt: NbdOpt, export: &Export) -> Result<()> {
+    fn handle_export_info<T: Read + Write>(
+        c: &mut Client<T>,
+        opt: NbdOpt,
+        export: &Export,
+    ) -> Result<()> {
         // Read name length
         let len = c.stream().read_u32::<BigEndian>()?;
         println!("Received length {}", len);
@@ -447,7 +442,11 @@ where
     }
 
     // TODO: support multiple (and actual) exports
-    fn handle_list(c: &mut Client<T>, name: &str, description: &str) -> Result<()> {
+    fn handle_list<T: Read + Write>(
+        c: &mut Client<T>,
+        name: &str,
+        description: &str,
+    ) -> Result<()> {
         let reply_header = OptionReply {
             magic: NBD_REP_MAGIC,
             option: (NbdOpt::List as u32),
@@ -468,7 +467,7 @@ where
         Ok(())
     }
 
-    fn info_reply(
+    fn info_reply<T: Read + Write>(
         c: &mut Client<T>,
         opt: NbdOpt,
         info_type: NbdInfoOpt,
@@ -499,7 +498,7 @@ where
         Ok(())
     }
 
-    fn header_reply(c: &mut Client<T>, header: OptionReply) -> Result<()> {
+    fn header_reply<T: Read + Write>(c: &mut Client<T>, header: OptionReply) -> Result<()> {
         let serialized = bincode::encode_to_vec(
             &header,
             Configuration::standard()
@@ -513,7 +512,7 @@ where
         Ok(())
     }
 
-    fn handshake_reply(
+    fn handshake_reply<T: Read + Write>(
         c: &mut Client<T>,
         client_option: NbdOpt,
         reply_type: NbdReply,
@@ -529,7 +528,11 @@ where
         Ok(())
     }
 
-    fn transmission_simple_reply_header(c: &mut Client<T>, handle: u64, error: u32) -> Result<()> {
+    fn transmission_simple_reply_header<T: Read + Write>(
+        c: &mut Client<T>,
+        handle: u64,
+        error: u32,
+    ) -> Result<()> {
         c.stream().write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
         c.stream().write_u32::<BigEndian>(error)?;
         c.stream().write_u64::<BigEndian>(handle)?;
@@ -537,7 +540,7 @@ where
         Ok(())
     }
 
-    fn do_read(
+    fn do_read<T: Read + Write>(
         &self,
         c: &mut Client<T>,
         handle: u64,
@@ -555,7 +558,7 @@ where
         Ok(())
     }
 
-    fn do_write(
+    fn do_write<T: Read + Write>(
         &self,
         c: &mut Client<T>,
         handle: u64,
@@ -568,21 +571,6 @@ where
         file.write_at(&buf, offset)?;
         Self::transmission_simple_reply_header(c, handle, 0)?;
         c.stream().flush()?;
-
-        Ok(())
-    }
-
-    fn add_connection(&self, client: Client<T>) -> Result<()> {
-        self.clients
-            .write()
-            .unwrap()
-            .insert(client.addr().to_owned(), client);
-
-        Ok(())
-    }
-
-    fn remove_connection(&self, addr: &str) -> Result<()> {
-        self.clients.write().unwrap().remove(addr);
 
         Ok(())
     }
