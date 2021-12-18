@@ -1,6 +1,6 @@
-use crate::Export;
+use crate::{client::Client, Export, Server};
 use anyhow::Result;
-use nbd::{client::Client, Server};
+
 use std::{
     io,
     os::unix::{
@@ -14,7 +14,7 @@ use std::{
 };
 
 pub fn start_unix_socket_server(export: &Export, path: &Path, stop: &AtomicBool) -> Result<()> {
-    let server: Arc<Server<UnixStream>> = Arc::new(nbd::Server::new(export.clone()));
+    let server: Arc<Server<UnixStream>> = Arc::new(Server::new(export.clone()));
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     let listener = UnixListener::bind(path)?;
     listener.set_nonblocking(true)?;

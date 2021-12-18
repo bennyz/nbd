@@ -6,12 +6,11 @@ use std::{
     time::Duration,
 };
 
-use crate::Export;
+use crate::{client::Client, Export, Server};
 use anyhow::Result;
-use nbd::{client::Client, Server};
 
 pub fn start_tcp_server(export: &Export, address: SocketAddr, stop: &AtomicBool) -> Result<()> {
-    let server: Arc<Server<TcpStream>> = Arc::new(nbd::Server::new(export.clone()));
+    let server: Arc<Server<TcpStream>> = Arc::new(Server::new(export.clone()));
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     let listener = TcpListener::bind(address)?;
     listener.set_nonblocking(true)?;

@@ -25,6 +25,8 @@ use crate::consts::{
 
 pub mod client;
 pub mod consts;
+pub mod tcp;
+pub mod unix;
 
 const EMPTY_REPLY: &[u8; 0] = b"";
 

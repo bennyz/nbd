@@ -1,12 +1,9 @@
-use crate::unix::start_unix_socket_server;
 use clap::Parser;
-use nbd::{self, Export};
+use nbd::tcp::start_tcp_server;
+use nbd::{self, unix::start_unix_socket_server, Export};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
-
-mod tcp;
-mod unix;
 
 #[derive(Parser, Clone)]
 #[clap(version = "0.0.1")]
@@ -61,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Listening on port {}", nbd::consts::NBD_DEFAULT_PORT);
     let export = export.read().unwrap();
 
-    tcp::start_tcp_server(
+    start_tcp_server(
         &export,
         format!("127.0.0.1:{}", nbd::consts::NBD_DEFAULT_PORT).parse()?,
         &stop_server,
