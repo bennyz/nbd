@@ -1,18 +1,27 @@
 use std::{
+    io,
     net::{SocketAddr, TcpListener, TcpStream},
-    sync::Arc,
-    thread::{self, JoinHandle},
+    sync::{self, atomic::AtomicBool, Arc},
+    thread::{self, sleep, JoinHandle},
+    time::Duration,
 };
 
 use crate::Export;
 use anyhow::Result;
 use nbd::{client::Client, Server};
 
-pub fn start_tcp_server(export: &Export, address: SocketAddr) -> Result<()> {
+pub fn start_tcp_server(export: &Export, address: SocketAddr, stop: &AtomicBool) -> Result<()> {
     let server: Arc<Server<TcpStream>> = Arc::new(nbd::Server::new(export.clone()));
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
     let listener = TcpListener::bind(address)?;
+    listener.set_nonblocking(true)?;
+
     for conn in listener.incoming() {
+        if stop.load(sync::atomic::Ordering::SeqCst) {
+            println!("Received stop signal, exiting");
+            break;
+        }
+
         match conn {
             Ok(stream) => {
                 let client_addr = stream.peer_addr().unwrap().to_string();
@@ -25,6 +34,15 @@ pub fn start_tcp_server(export: &Export, address: SocketAddr) -> Result<()> {
                 handles.push(join_handle);
             }
             Err(e) => {
+                match e.kind() {
+                    io::ErrorKind::WouldBlock => {
+                        sleep(Duration::from_millis(100));
+                        continue;
+                    }
+                    _ => {
+                        eprintln!("error: {}", e);
+                    }
+                }
                 eprintln!("error: {}", e)
             }
         }

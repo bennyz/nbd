@@ -1,9 +1,9 @@
+use crate::unix::start_unix_socket_server;
 use clap::Parser;
 use nbd::{self, Export};
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
-
-use crate::unix::start_unix_socket_server;
 
 mod tcp;
 mod unix;
@@ -40,10 +40,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.description,
     )?));
 
-    let clone = &Arc::clone(&export);
+    let stop_server = Arc::new(AtomicBool::new(false));
+    let clone_stop_server = Arc::clone(&stop_server);
+    ctrlc::set_handler(move || {
+        clone_stop_server.store(true, std::sync::atomic::Ordering::SeqCst);
+    })?;
+
     if args.unix {
         println!("Listening on UNIX socket {}", "/tmp/nbd.sock");
-        start_unix_socket_server(&clone.read().unwrap(), Path::new("/tmp/nbd.sock"))?;
+        start_unix_socket_server(
+            &export.read().unwrap(),
+            Path::new("/tmp/nbd.sock"),
+            &stop_server,
+        )?;
+
+        return Ok(());
     }
 
     // Make backends for each export selectable
@@ -53,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tcp::start_tcp_server(
         &export,
         format!("127.0.0.1:{}", nbd::consts::NBD_DEFAULT_PORT).parse()?,
+        &stop_server,
     )?;
 
     Ok(())
