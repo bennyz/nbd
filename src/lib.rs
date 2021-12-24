@@ -71,7 +71,7 @@ impl Export {
             trim: false,
             flush: false,
             rotational: false,
-            df: false,
+            df: true,
             multiconn: true,
         };
 
@@ -164,6 +164,9 @@ impl Server {
             let option_length = c.stream().read_u32::<BigEndian>()?;
             println!("Received option length {}", option_length);
 
+            let mut option_data = vec![0; option_length as usize];
+            c.read_exact(&mut option_data)?;
+            println!("Read option data {:?}", option_data);
             // TODO: Remove later
             let option: NbdOpt = unsafe { transmute(option) };
 
@@ -200,20 +203,15 @@ impl Server {
                 }
                 NbdOpt::StructuredReply => {
                     c.set_structured_reply(true);
-                    protocol::handshake_reply(
-                        c,
-                        option,
-                        NbdReply::NbdRepErrUnsup,
-                        protocol::EMPTY_REPLY,
-                    )?;
+                    protocol::handshake_reply(c, option, NbdReply::Ack, protocol::EMPTY_REPLY)?;
                 }
                 opt @ NbdOpt::Info => {
                     println!("Received info");
-                    handle_export_info(c, opt, export)?;
+                    handle_export_info(c, opt, export, &option_data)?;
                 }
                 opt @ NbdOpt::Go => {
                     println!("Received go");
-                    handle_export_info(c, opt, export)?;
+                    handle_export_info(c, opt, export, &option_data)?;
                     return Ok(InteractionResult::Continue);
                 }
                 NbdOpt::ListMetaContext => {
@@ -333,19 +331,10 @@ fn handle_export_info<T: Read + Write>(
     c: &mut Client<T>,
     opt: NbdOpt,
     export: &Export,
+    data: &[u8],
 ) -> Result<()> {
-    // Read name length
-    let len = c.stream().read_u32::<BigEndian>()?;
-    println!("Received length {}", len);
-    let mut buf: Vec<u8> = vec![0; len as usize];
-
-    // Read name
-    c.stream().read_exact(buf.as_mut_slice())?;
-    let export_name = String::from_utf8(buf.clone())?;
-    println!("Received export name {}", export_name);
-
     // Read number of requests
-    let requests = c.stream().read_u16::<BigEndian>()?;
+    let requests = u16::from_be_bytes(data[0..2].try_into().unwrap());
     println!("Receiving {} request(s)", requests);
 
     let mut send_name = false;
