@@ -27,9 +27,12 @@ pub fn start_unix_socket_server(export: &Export, path: &Path, stop: &AtomicBool)
                 let fd = &stream.as_raw_fd();
                 let mut client = Client::new(stream, format!("unix-sock-{}", fd));
                 let clone = Arc::clone(&server);
-                handles.push(thread::spawn(move || {
-                    clone.handle(&mut client).unwrap();
-                }));
+                let h = thread::spawn(move || {
+                    if let Err(e) = clone.handle(&mut client) {
+                        eprintln!("Error handling client: {}", e);
+                    }
+                });
+                handles.push(h);
             }
             Err(e) => {
                 match e.kind() {
@@ -45,7 +48,11 @@ pub fn start_unix_socket_server(export: &Export, path: &Path, stop: &AtomicBool)
             }
         }
     }
-    handles.into_iter().for_each(|h| h.join().unwrap());
+    handles.into_iter().for_each(|h| {
+        if h.join().is_err() {
+            println!("Thread panicked");
+        }
+    });
 
     // Maybe this can be done automatically somehow?
     println!("Cleaning up UNIX socket: {}", path.to_str().unwrap());
