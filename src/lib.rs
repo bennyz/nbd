@@ -4,14 +4,14 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use client::Client;
 use consts::{
     NbdReply, NBD_FLAG_C_FIXED_NEWSTYLE, NBD_FLAG_C_NO_ZEROES, NBD_FLAG_FIXED_NEWSTYLE,
-    NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
+    NBD_FLAG_HAS_FLAGS, NBD_FLAG_NO_ZEROES,
 };
 
 use std::fmt::Debug;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::intrinsics::transmute;
 use std::io::{Read, Write};
-use std::os::unix::prelude::{FileExt, MetadataExt};
+use std::os::unix::prelude::MetadataExt;
 use std::path::Path;
 
 use thiserror::Error;
@@ -23,10 +23,9 @@ use crate::consts::{
 
 pub mod client;
 pub mod consts;
+mod protocol;
 pub mod tcp;
 pub mod unix;
-
-const EMPTY_REPLY: &[u8; 0] = b"";
 
 #[derive(Debug, Error)]
 pub enum NbdError {
@@ -78,28 +77,6 @@ impl Export {
 
         Ok(export)
     }
-}
-
-#[derive(Debug, bincode::Encode, bincode::Decode)]
-#[repr(C)]
-struct OptionReply {
-    magic: u64,
-    option: u32,
-    reply_type: u32,
-    length: u32,
-}
-
-// NBD client request
-// #define NBD_REQUEST_SIZE            (4 + 2 + 2 + 8 + 8 + 4)
-#[derive(Debug, bincode::Encode, bincode::Decode)]
-#[repr(C)]
-struct Request {
-    magic: u32,
-    flags: u16,
-    command_type: u16,
-    handle: u64,
-    offset: u64,
-    len: u32,
 }
 
 #[derive(Debug)]
@@ -192,7 +169,12 @@ impl Server {
 
             match option {
                 NbdOpt::Export => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    protocol::handshake_reply(
+                        c,
+                        option,
+                        NbdReply::NbdRepErrUnsup,
+                        protocol::EMPTY_REPLY,
+                    )?;
                 }
                 NbdOpt::ExportName => {
                     println!("Received EXPORT_NAME option");
@@ -205,36 +187,58 @@ impl Server {
                     c.stream().flush()?;
                 }
                 NbdOpt::List => {
-                    Self::handle_list(c, &export.name, &export.description)?;
+                    protocol::handle_list(c, &export.name, &export.description)?;
                 }
                 NbdOpt::Abort => {
                     println!("Aborting");
-                    if Self::handshake_reply(c, option, NbdReply::Ack, EMPTY_REPLY).is_err() {
+                    if protocol::handshake_reply(c, option, NbdReply::Ack, protocol::EMPTY_REPLY)
+                        .is_err()
+                    {
                         eprintln!("Ignoring abort ACK errors");
                     }
                     return Ok(InteractionResult::Abort);
                 }
                 NbdOpt::StructuredReply => {
                     c.set_structured_reply(true);
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    protocol::handshake_reply(
+                        c,
+                        option,
+                        NbdReply::NbdRepErrUnsup,
+                        protocol::EMPTY_REPLY,
+                    )?;
                 }
                 opt @ NbdOpt::Info => {
                     println!("Received info");
-                    Self::handle_export_info(c, opt, export)?;
+                    handle_export_info(c, opt, export)?;
                 }
                 opt @ NbdOpt::Go => {
                     println!("Received go");
-                    Self::handle_export_info(c, opt, export)?;
+                    handle_export_info(c, opt, export)?;
                     return Ok(InteractionResult::Continue);
                 }
                 NbdOpt::ListMetaContext => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    protocol::handshake_reply(
+                        c,
+                        option,
+                        NbdReply::NbdRepErrUnsup,
+                        protocol::EMPTY_REPLY,
+                    )?;
                 }
                 NbdOpt::SetMetaContext => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    protocol::handshake_reply(
+                        c,
+                        option,
+                        NbdReply::NbdRepErrUnsup,
+                        protocol::EMPTY_REPLY,
+                    )?;
                 }
                 NbdOpt::StartTls => {
-                    Self::handshake_reply(c, option, NbdReply::NbdRepErrUnsup, EMPTY_REPLY)?;
+                    protocol::handshake_reply(
+                        c,
+                        option,
+                        NbdReply::NbdRepErrUnsup,
+                        protocol::EMPTY_REPLY,
+                    )?;
                 }
             }
         }
@@ -264,7 +268,7 @@ impl Server {
                 return Ok(InteractionResult::Abort);
             }
 
-            let request: Request = bincode::decode_from_slice(
+            let request: protocol::Request = bincode::decode_from_slice(
                 &request_buf,
                 Configuration::standard()
                     .with_big_endian()
@@ -289,13 +293,7 @@ impl Server {
                         "Received read request, len {}, offset {}",
                         request.len, request.offset
                     );
-                    self.do_read(
-                        c,
-                        request.handle,
-                        request.offset,
-                        request.len,
-                        &file,
-                    )?;
+                    protocol::do_read(c, request.handle, request.offset, request.len, file)?;
                 }
                 NbdCmd::Write => {
                     println!(
@@ -303,13 +301,7 @@ impl Server {
                         request.len, request.offset
                     );
 
-                    self.do_write(
-                        c,
-                        request.handle,
-                        request.offset,
-                        request.len,
-                        &file,
-                    )?;
+                    protocol::do_write(c, request.handle, request.offset, request.len, file)?;
                 }
                 NbdCmd::Disc => {
                     println!("Disconnect requested");
@@ -335,245 +327,111 @@ impl Server {
             }
         }
     }
+}
 
-    fn handle_export_info<T: Read + Write>(
-        c: &mut Client<T>,
-        opt: NbdOpt,
-        export: &Export,
-    ) -> Result<()> {
-        // Read name length
-        let len = c.stream().read_u32::<BigEndian>()?;
-        println!("Received length {}", len);
-        let mut buf: Vec<u8> = vec![0; len as usize];
+fn handle_export_info<T: Read + Write>(
+    c: &mut Client<T>,
+    opt: NbdOpt,
+    export: &Export,
+) -> Result<()> {
+    // Read name length
+    let len = c.stream().read_u32::<BigEndian>()?;
+    println!("Received length {}", len);
+    let mut buf: Vec<u8> = vec![0; len as usize];
 
-        // Read name
-        c.stream().read_exact(buf.as_mut_slice())?;
-        let export_name = String::from_utf8(buf.clone())?;
-        println!("Received export name {}", export_name);
+    // Read name
+    c.stream().read_exact(buf.as_mut_slice())?;
+    let export_name = String::from_utf8(buf.clone())?;
+    println!("Received export name {}", export_name);
 
-        // Read number of requests
-        let requests = c.stream().read_u16::<BigEndian>()?;
-        println!("Receiving {} request(s)", requests);
+    // Read number of requests
+    let requests = c.stream().read_u16::<BigEndian>()?;
+    println!("Receiving {} request(s)", requests);
 
-        let mut send_name = false;
-        let mut send_description = false;
+    let mut send_name = false;
+    let mut send_description = false;
 
-        for i in 0..requests {
-            // TODO use proper safe conversion
-            let option = unsafe { transmute(c.stream().read_u16::<BigEndian>()?) };
-            println!("Request {}/{}, option {:?}", i + 1, requests, option);
+    for i in 0..requests {
+        // TODO use proper safe conversion
+        let option = unsafe { transmute(c.stream().read_u16::<BigEndian>()?) };
+        println!("Request {}/{}, option {:?}", i + 1, requests, option);
 
-            match option {
-                NbdInfoOpt::Export => {
-                    println!("Sending export info");
-                }
-                NbdInfoOpt::Name => {
-                    println!("export name requested");
-                    send_name = true;
-                }
-                NbdInfoOpt::Description => {
-                    println!("export description requested");
-                    send_description = true;
-                }
-                NbdInfoOpt::BlockSize => {
-                    println!("block size requested");
-                }
-                NbdInfoOpt::Unknown => {
-                    panic!("Shouldn't happen");
-                }
+        match option {
+            NbdInfoOpt::Export => {
+                println!("Sending export info");
+            }
+            NbdInfoOpt::Name => {
+                println!("export name requested");
+                send_name = true;
+            }
+            NbdInfoOpt::Description => {
+                println!("export description requested");
+                send_description = true;
+            }
+            NbdInfoOpt::BlockSize => {
+                println!("block size requested");
+            }
+            NbdInfoOpt::Unknown => {
+                panic!("Shouldn't happen");
             }
         }
+    }
 
-        if send_name {
-            Self::info_reply(
-                c,
-                opt,
-                NbdInfoOpt::Name,
-                (export.name.len() + 2) as u32,
-                export.name.as_bytes(),
-            )?;
-        }
-
-        if send_description {
-            Self::info_reply(
-                c,
-                opt,
-                NbdInfoOpt::Description,
-                (export.description.len() + 2) as u32,
-                export.description.as_bytes(),
-            )?;
-        }
-
-        let sizes: Vec<u32> = vec![
-            MIN_BLOCK_SIZE as u32,
-            PREFERRED_BLOCK_SIZE as u32,
-            std::cmp::min(export.size, MAX_BLOCK_SIZE) as u32,
-        ];
-
-        println!("Reporting sizes {:?}", sizes);
-
-        Self::info_reply(
+    if send_name {
+        protocol::info_reply(
             c,
             opt,
-            NbdInfoOpt::BlockSize,
-            14,
-            &sizes
-                .iter()
-                .flat_map(|x| x.to_be_bytes())
-                .collect::<Vec<u8>>(),
+            NbdInfoOpt::Name,
+            (export.name.len() + 2) as u32,
+            export.name.as_bytes(),
         )?;
-
-        let mut flags: u16 = 0;
-        set_flags(export, &mut flags);
-
-        println!(
-            "Sending export '{}' information, flags {}",
-            export.name, flags
-        );
-        Self::info_reply(c, opt, NbdInfoOpt::Export, 12, EMPTY_REPLY)?;
-
-        c.stream().write_all(&export.size.to_be_bytes())?;
-        c.stream().write_all(&flags.to_be_bytes())?;
-        c.stream().flush()?;
-
-        Self::handshake_reply(c, opt, NbdReply::Ack, EMPTY_REPLY)?;
-
-        Ok(())
     }
 
-    // TODO: support multiple (and actual) exports
-    fn handle_list<T: Read + Write>(
-        c: &mut Client<T>,
-        name: &str,
-        description: &str,
-    ) -> Result<()> {
-        let reply_header = OptionReply {
-            magic: NBD_REP_MAGIC,
-            option: (NbdOpt::List as u32),
-            reply_type: (NbdReply::Server as u32),
-
-            // Why +4? size of the length field (32)
-            length: (name.len() as u32 + description.len() as u32 + 4),
-        };
-
-        Self::header_reply(c, reply_header)?;
-        c.stream().write_all(&(name.len() as u32).to_be_bytes())?;
-        c.stream().write_all(name.as_bytes())?;
-        c.stream().write_all(description.as_bytes())?;
-        c.stream().flush()?;
-
-        Self::handshake_reply(c, NbdOpt::List, NbdReply::Ack, EMPTY_REPLY)?;
-
-        Ok(())
-    }
-
-    fn info_reply<T: Read + Write>(
-        c: &mut Client<T>,
-        opt: NbdOpt,
-        info_type: NbdInfoOpt,
-        len: u32,
-        data: &[u8],
-    ) -> Result<()> {
-        let header = OptionReply {
-            magic: NBD_REP_MAGIC,
-            option: (opt as u32),
-            reply_type: (NbdReply::Info as u32),
-            length: len,
-        };
-
-        c.stream().write_all(&bincode::encode_to_vec(
-            &header,
-            Configuration::standard()
-                .with_big_endian()
-                .with_fixed_int_encoding(),
-        )?)?;
-        c.stream().write_u16::<BigEndian>(info_type as u16)?;
-
-        // Send payload
-        if data != EMPTY_REPLY {
-            c.stream().write_all(data)?;
-        }
-        c.stream().flush()?;
-
-        Ok(())
-    }
-
-    fn header_reply<T: Read + Write>(c: &mut Client<T>, header: OptionReply) -> Result<()> {
-        let serialized = bincode::encode_to_vec(
-            &header,
-            Configuration::standard()
-                .with_big_endian()
-                .with_fixed_int_encoding(),
+    if send_description {
+        protocol::info_reply(
+            c,
+            opt,
+            NbdInfoOpt::Description,
+            (export.description.len() + 2) as u32,
+            export.description.as_bytes(),
         )?;
-
-        c.stream().write_all(&serialized)?;
-        c.stream().flush()?;
-
-        Ok(())
     }
 
-    fn handshake_reply<T: Read + Write>(
-        c: &mut Client<T>,
-        client_option: NbdOpt,
-        reply_type: NbdReply,
-        data: &[u8],
-    ) -> Result<()> {
-        c.stream().write_u64::<BigEndian>(NBD_REP_MAGIC)?;
-        c.stream().write_u32::<BigEndian>(client_option as u32)?;
-        c.stream().write_u32::<BigEndian>(reply_type as u32)?;
-        c.stream().write_u32::<BigEndian>(data.len() as u32)?;
-        c.stream().write_all(data)?;
-        c.stream().flush()?;
+    let sizes: Vec<u32> = vec![
+        MIN_BLOCK_SIZE as u32,
+        PREFERRED_BLOCK_SIZE as u32,
+        std::cmp::min(export.size, MAX_BLOCK_SIZE) as u32,
+    ];
 
-        Ok(())
-    }
+    println!("Reporting sizes {:?}", sizes);
 
-    fn transmission_simple_reply_header<T: Read + Write>(
-        c: &mut Client<T>,
-        handle: u64,
-        error: u32,
-    ) -> Result<()> {
-        c.stream().write_u32::<BigEndian>(NBD_SIMPLE_REPLY_MAGIC)?;
-        c.stream().write_u32::<BigEndian>(error)?;
-        c.stream().write_u64::<BigEndian>(handle)?;
+    protocol::info_reply(
+        c,
+        opt,
+        NbdInfoOpt::BlockSize,
+        14,
+        &sizes
+            .iter()
+            .flat_map(|x| x.to_be_bytes())
+            .collect::<Vec<u8>>(),
+    )?;
 
-        Ok(())
-    }
+    let mut flags: u16 = 0;
+    set_flags(export, &mut flags);
 
-    fn do_read<T: Read + Write>(
-        &self,
-        c: &mut Client<T>,
-        handle: u64,
-        offset: u64,
-        len: u32,
-        file: &File,
-    ) -> Result<()> {
-        let mut buf: Vec<u8> = vec![0; len as usize];
-        let read = file.read_at(buf.as_mut_slice(), offset)?;
-        println!("Read {} bytes", read);
-        Self::transmission_simple_reply_header(c, handle, 0)?;
+    println!(
+        "Sending export '{}' information, flags {}",
+        export.name, flags
+    );
+    protocol::info_reply(c, opt, NbdInfoOpt::Export, 12, protocol::EMPTY_REPLY)?;
 
-        c.stream().write_all(&buf)?;
-        c.stream().flush()?;
-        Ok(())
-    }
+    c.stream().write_all(&export.size.to_be_bytes())?;
+    c.stream().write_all(&flags.to_be_bytes())?;
+    c.stream().flush()?;
 
-    fn do_write<T: Read + Write>(
-        &self,
-        c: &mut Client<T>,
-        handle: u64,
-        offset: u64,
-        len: u32,
-        file: &File,
-    ) -> Result<()> {
-        let mut buf: Vec<u8> = vec![0; len as usize];
-        c.stream().read_exact(buf.as_mut_slice())?;
-        file.write_at(&buf, offset)?;
-        Self::transmission_simple_reply_header(c, handle, 0)?;
-        c.stream().flush()?;
+    protocol::handshake_reply(c, opt, NbdReply::Ack, protocol::EMPTY_REPLY)?;
 
-        Ok(())
-    }
+    Ok(())
 }
 
 fn set_flags(export: &Export, flags: &mut u16) {
