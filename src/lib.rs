@@ -75,6 +75,8 @@ impl Export {
             multiconn: true,
         };
 
+        println!("Export size {}", export.size);
+
         Ok(export)
     }
 }
@@ -263,6 +265,9 @@ impl Server {
 
             if (read as u32) < NBD_REQUEST_SIZE {
                 eprintln!("Invalid request size");
+
+                // TODO check if client is still there
+                c.write_u32::<BigEndian>(145)?;
             }
 
             let request: protocol::Request = bincode::decode_from_slice(

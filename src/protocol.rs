@@ -189,12 +189,10 @@ pub fn structured_reply<T: Read + Write>(
 ) -> Result<()> {
     let mut start = request.offset;
     let end = start + request.len as u64;
-    let mut chunk_size = DEFAULT_CHUNK_SIZE;
-    if request.len < chunk_size as u32 {
-        chunk_size = request.len as u64;
-    }
-    if start + chunk_size > end {
-        let mut buf: Vec<u8> = vec![0; (end + 8) as usize];
+    let chunk_size = DEFAULT_CHUNK_SIZE;
+
+    while start + chunk_size < end {
+        let mut buf: Vec<u8> = vec![0; (chunk_size + 8) as usize];
         (&start.to_be_bytes()[..]).read_exact(&mut buf[0..8])?;
         data.read_exact_at(&mut buf[8..], start)?;
 
@@ -203,7 +201,7 @@ pub fn structured_reply<T: Read + Write>(
             flags: 0,
             reply_type: NBD_REPLY_TYPE_OFFSET_DATA,
             handle: request.handle,
-            length: (end + 8) as u32,
+            length: (chunk_size + 8) as u32,
         };
 
         c.write_all(&bincode::encode_to_vec(
@@ -212,28 +210,28 @@ pub fn structured_reply<T: Read + Write>(
                 .with_big_endian()
                 .with_fixed_int_encoding(),
         )?)?;
-        c.write_all(&buf)?;
-    } else {
-        while start + chunk_size < end {
-            let mut buf: Vec<u8> = vec![0; (chunk_size + 8) as usize];
-            (&start.to_be_bytes()[..]).read_exact(&mut buf[0..8])?;
-            data.read_exact_at(&mut buf[8..], start)?;
-            let header = StructuredReplyHeader {
-                magic: NBD_STRUCTURED_REPLY_MAGIC,
-                flags: 0,
-                reply_type: NBD_REPLY_TYPE_OFFSET_DATA,
-                handle: request.handle,
-                length: (chunk_size + 8) as u32,
-            };
-            c.write_all(&bincode::encode_to_vec(
-                &header,
-                Configuration::standard()
-                    .with_big_endian()
-                    .with_fixed_int_encoding(),
-            )?)?;
-            c.stream().write_all(&buf)?;
-            start += chunk_size;
-        }
+        c.stream().write_all(&buf)?;
+        start += chunk_size;
+    }
+
+    if start < end {
+        let mut buf: Vec<u8> = vec![0; (end - start + 8) as usize];
+        (&start.to_be_bytes()[..]).read_exact(&mut buf[0..8])?;
+        data.read_exact_at(&mut buf[8..], start)?;
+        let header = StructuredReplyHeader {
+            magic: NBD_STRUCTURED_REPLY_MAGIC,
+            flags: 0,
+            reply_type: NBD_REPLY_TYPE_OFFSET_DATA,
+            handle: request.handle,
+            length: (end - start + 8) as u32,
+        };
+        c.write_all(&bincode::encode_to_vec(
+            &header,
+            Configuration::standard()
+                .with_big_endian()
+                .with_fixed_int_encoding(),
+        )?)?;
+        c.stream().write_all(&buf)?;
     }
 
     let header = StructuredReplyHeader {
