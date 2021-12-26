@@ -35,6 +35,17 @@ pub const NBD_FLAG_SEND_RESIZE: u16 = 1 << 9;
 pub const NBD_FLAG_SEND_CACHE: u16 = 1 << 10;
 pub const NBD_FLAG_SEND_FAST_ZERO: u16 = 1 << 11;
 
+// Structured reply
+pub const NBD_STRUCTURED_REPLY_MAGIC: u32 = 0x668e33ef;
+pub const NBD_REPLY_FLAG_DONE: u16 = 1 << 0;
+
+// Chunk types
+// TODO: make enum
+pub const NBD_REPLY_TYPE_NONE: u16 = 0;
+pub const NBD_REPLY_TYPE_OFFSET_DATA: u16 = 1;
+pub const NBD_REPLY_TYPE_OFFSET_HOLE: u16 = 2;
+pub const NBD_REPLY_TYPE_BLOCK_STATUS: u16 = 5;
+
 #[repr(u16)]
 pub enum NbdCmd {
     Read,

@@ -9,10 +9,15 @@ use std::{
 
 use crate::{
     client::Client,
-    consts::{NbdInfoOpt, NbdOpt, NbdReply, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC},
+    consts::{
+        NbdInfoOpt, NbdOpt, NbdReply, NBD_REPLY_FLAG_DONE, NBD_REPLY_TYPE_NONE,
+        NBD_REPLY_TYPE_OFFSET_DATA, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
+        NBD_STRUCTURED_REPLY_MAGIC,
+    },
 };
 
 pub const EMPTY_REPLY: &[u8; 0] = b"";
+pub const DEFAULT_CHUNK_SIZE: u64 = 4096;
 
 #[derive(Debug, bincode::Encode, bincode::Decode)]
 #[repr(C)]
@@ -26,9 +31,10 @@ pub struct OptionReply {
 #[derive(Debug, bincode::Encode, bincode::Decode)]
 #[repr(C)]
 pub struct StructuredReplyHeader {
-    pub magic: u64,
-    pub option: u32,
-    pub reply_type: u32,
+    pub magic: u32,
+    pub flags: u16,
+    pub reply_type: u16,
+    pub handle: u64,
     pub length: u32,
 }
 
@@ -144,19 +150,17 @@ pub fn transmission_simple_reply_header<T: Read + Write>(
     Ok(())
 }
 
-pub fn do_read<T: Read + Write>(
-    c: &mut Client<T>,
-    handle: u64,
-    offset: u64,
-    len: u32,
-    file: &File,
-) -> Result<()> {
-    let mut buf: Vec<u8> = vec![0; len as usize];
-    let read = file.read_at(buf.as_mut_slice(), offset)?;
-    println!("Read {} bytes", read);
-    transmission_simple_reply_header(c, handle, 0)?;
+pub fn do_read<T: Read + Write>(c: &mut Client<T>, request: &Request, file: &File) -> Result<()> {
+    if !c.structured_reply() {
+        transmission_simple_reply_header(c, request.handle, 0)?;
+        let mut buf: Vec<u8> = vec![0; request.len as usize];
+        file.read_at(buf.as_mut_slice(), request.offset)?;
+        c.stream().write_all(&buf)?;
+    } else {
+        println!("structured reply");
+        structured_reply(c, request, file)?;
+    }
 
-    c.stream().write_all(&buf)?;
     c.stream().flush()?;
     Ok(())
 }
@@ -172,7 +176,78 @@ pub fn do_write<T: Read + Write>(
     c.stream().read_exact(buf.as_mut_slice())?;
     file.write_at(&buf, offset)?;
     transmission_simple_reply_header(c, handle, 0)?;
+
     c.stream().flush()?;
+
+    Ok(())
+}
+
+pub fn structured_reply<T: Read + Write>(
+    c: &mut Client<T>,
+    request: &Request,
+    data: &File,
+) -> Result<()> {
+    let mut start = request.offset;
+    let end = start + request.len as u64;
+    let chunk_size = DEFAULT_CHUNK_SIZE;
+    if start + chunk_size > end {
+        let mut buf: Vec<u8> = vec![0; (end + 8) as usize];
+        (&start.to_be_bytes()[..]).read_exact(&mut buf[0..8])?;
+        data.read_exact_at(&mut buf[8..], start)?;
+
+        let header = StructuredReplyHeader {
+            magic: NBD_STRUCTURED_REPLY_MAGIC,
+            flags: 0,
+            reply_type: NBD_REPLY_TYPE_OFFSET_DATA,
+            handle: request.handle,
+            length: (end + 8) as u32,
+        };
+
+        c.write_all(&bincode::encode_to_vec(
+            &header,
+            Configuration::standard()
+                .with_big_endian()
+                .with_fixed_int_encoding(),
+        )?)?;
+        c.write_all(&buf)?;
+    } else {
+        while start + chunk_size < end {
+            let mut buf: Vec<u8> = vec![0; (chunk_size + 8) as usize];
+            (&start.to_be_bytes()[..]).read_exact(&mut buf[0..8])?;
+            data.read_exact_at(&mut buf[8..], start)?;
+            let header = StructuredReplyHeader {
+                magic: NBD_STRUCTURED_REPLY_MAGIC,
+                flags: 0,
+                reply_type: NBD_REPLY_TYPE_OFFSET_DATA,
+                handle: request.handle,
+                length: (chunk_size + 8) as u32,
+            };
+            c.write_all(&bincode::encode_to_vec(
+                &header,
+                Configuration::standard()
+                    .with_big_endian()
+                    .with_fixed_int_encoding(),
+            )?)?;
+            c.stream().write_all(&buf)?;
+            start += chunk_size;
+        }
+    }
+
+    let header = StructuredReplyHeader {
+        magic: NBD_STRUCTURED_REPLY_MAGIC,
+        flags: NBD_REPLY_FLAG_DONE,
+        reply_type: NBD_REPLY_TYPE_NONE,
+        handle: request.handle,
+        length: 0,
+    };
+    c.write_all(&bincode::encode_to_vec(
+        &header,
+        Configuration::standard()
+            .with_big_endian()
+            .with_fixed_int_encoding(),
+    )?)?;
+
+    c.flush()?;
 
     Ok(())
 }

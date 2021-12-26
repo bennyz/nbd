@@ -263,7 +263,6 @@ impl Server {
 
             if (read as u32) < NBD_REQUEST_SIZE {
                 eprintln!("Invalid request size");
-                return Ok(InteractionResult::Abort);
             }
 
             let request: protocol::Request = bincode::decode_from_slice(
@@ -291,7 +290,7 @@ impl Server {
                         "Received read request, len {}, offset {}",
                         request.len, request.offset
                     );
-                    protocol::do_read(c, request.handle, request.offset, request.len, file)?;
+                    protocol::do_read(c, &request, file)?;
                 }
                 NbdCmd::Write => {
                     println!(
