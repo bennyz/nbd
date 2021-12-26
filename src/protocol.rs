@@ -189,7 +189,10 @@ pub fn structured_reply<T: Read + Write>(
 ) -> Result<()> {
     let mut start = request.offset;
     let end = start + request.len as u64;
-    let chunk_size = DEFAULT_CHUNK_SIZE;
+    let mut chunk_size = DEFAULT_CHUNK_SIZE;
+    if request.len < chunk_size as u32 {
+        chunk_size = request.len as u64;
+    }
     if start + chunk_size > end {
         let mut buf: Vec<u8> = vec![0; (end + 8) as usize];
         (&start.to_be_bytes()[..]).read_exact(&mut buf[0..8])?;
