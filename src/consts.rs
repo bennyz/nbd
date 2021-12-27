@@ -94,20 +94,3 @@ pub enum NbdInfoOpt {
     BlockSize = 3,
     Unknown = 4,
 }
-
-#[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum NbdFlags {
-    HasFlags = 0,
-    ReadOnly = 1,
-    SendFlush = 2,
-    SendFua = 3,
-    RotationalBit = 4,
-    SendTrim = 5,
-    SendWriteZeroes = 6,
-    SendDf = 7,
-    CanMultiConn = 8,
-    SendResize = 9,
-    SendCache = 10,
-    SendFastZero = 11,
-}
