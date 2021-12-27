@@ -12,6 +12,11 @@ pub const NBD_SIMPLE_REPLY_MAGIC: u32 = 0x67446698;
 pub const NBD_REQUEST_MAGIC: u32 = 0x25609513;
 
 pub const NBD_REQUEST_SIZE: u32 = 28;
+pub const NBD_CMD_FLAG_FUA: u16 = 1 << 0;
+pub const NBD_CMD_FLAG_NO_HOLE: u16 = 1 << 1;
+pub const NBD_CMD_FLAG_DF: u16 = 1 << 2;
+pub const NBD_CMD_FLAG_REQ_ONE: u16 = 1 << 3;
+pub const NBD_CMD_FLAG_FAST_ZERO: u16 = 1 << 4;
 
 // Reply errors
 pub const NBD_REP_FLAG_ERROR: u32 = 1 << 31;

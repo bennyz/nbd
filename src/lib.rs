@@ -75,8 +75,6 @@ impl Export {
             multiconn: true,
         };
 
-        println!("Export size {}", export.size);
-
         Ok(export)
     }
 }

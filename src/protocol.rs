@@ -10,7 +10,7 @@ use std::{
 use crate::{
     client::Client,
     consts::{
-        NbdInfoOpt, NbdOpt, NbdReply, NBD_REPLY_FLAG_DONE, NBD_REPLY_TYPE_NONE,
+        NbdInfoOpt, NbdOpt, NbdReply, NBD_CMD_FLAG_DF, NBD_REPLY_FLAG_DONE, NBD_REPLY_TYPE_NONE,
         NBD_REPLY_TYPE_OFFSET_DATA, NBD_REP_MAGIC, NBD_SIMPLE_REPLY_MAGIC,
         NBD_STRUCTURED_REPLY_MAGIC,
     },
@@ -189,7 +189,10 @@ pub fn structured_reply<T: Read + Write>(
 ) -> Result<()> {
     let mut start = request.offset;
     let end = start + request.len as u64;
-    let chunk_size = DEFAULT_CHUNK_SIZE;
+    let mut chunk_size = DEFAULT_CHUNK_SIZE;
+    if request.flags & NBD_CMD_FLAG_DF != 0 {
+        chunk_size = request.len as u64;
+    }
 
     while start + chunk_size < end {
         let mut buf: Vec<u8> = vec![0; (chunk_size + 8) as usize];
