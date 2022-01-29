@@ -1,5 +1,4 @@
 use anyhow::Result;
-use bincode::config::Configuration;
 use byteorder::{BigEndian, WriteBytesExt};
 use std::{
     fs::File,
@@ -93,7 +92,7 @@ pub fn info_reply<T: Read + Write>(
 
     c.stream().write_all(&bincode::encode_to_vec(
         &header,
-        Configuration::standard()
+        bincode::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding(),
     )?)?;
@@ -111,7 +110,7 @@ pub fn info_reply<T: Read + Write>(
 pub fn header_reply<T: Read + Write>(c: &mut Client<T>, header: OptionReply) -> Result<()> {
     let serialized = bincode::encode_to_vec(
         &header,
-        Configuration::standard()
+        bincode::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding(),
     )?;
@@ -209,7 +208,7 @@ pub fn structured_reply<T: Read + Write>(
 
         c.write_all(&bincode::encode_to_vec(
             &header,
-            Configuration::standard()
+            bincode::config::standard()
                 .with_big_endian()
                 .with_fixed_int_encoding(),
         )?)?;
@@ -230,7 +229,7 @@ pub fn structured_reply<T: Read + Write>(
         };
         c.write_all(&bincode::encode_to_vec(
             &header,
-            Configuration::standard()
+            bincode::config::standard()
                 .with_big_endian()
                 .with_fixed_int_encoding(),
         )?)?;
@@ -246,7 +245,7 @@ pub fn structured_reply<T: Read + Write>(
     };
     c.write_all(&bincode::encode_to_vec(
         &header,
-        Configuration::standard()
+        bincode::config::standard()
             .with_big_endian()
             .with_fixed_int_encoding(),
     )?)?;

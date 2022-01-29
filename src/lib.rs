@@ -1,5 +1,4 @@
 use anyhow::Result;
-use bincode::config::Configuration;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use client::Client;
 use consts::{
@@ -270,7 +269,7 @@ impl Server {
 
             let request: protocol::Request = bincode::decode_from_slice(
                 &request_buf,
-                Configuration::standard()
+                bincode::config::standard()
                     .with_big_endian()
                     .with_fixed_int_encoding(),
             )?
