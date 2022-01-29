@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: add musl target
+      run: rustup target add x86_64-unknown-linux-musl
     - name: Install qemu-utils
       run: sudo apt-get install -y qemu-utils
     - uses: actions/checkout@v2
