@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     start_tcp_server(
         &export,
-        format!("127.0.0.1:{}", nbd::consts::NBD_DEFAULT_PORT).parse()?,
+        format!("0.0.0.0:{}", nbd::consts::NBD_DEFAULT_PORT).parse()?,
         &stop_server,
     )?;
 
