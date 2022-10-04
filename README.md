@@ -34,7 +34,7 @@ OPTIONS:
 
 ## Examples
 
-Note: These example rely on third-party clients, like `qemu-img`, projects from `nbdkit` (`nbdinfo`) and `nbd-client`
+Note: These examples rely on third-party clients, like `qemu-img`, projects from `nbdkit` (`nbdinfo`) and `nbd-client`
 
 ```shell
 $ qemu-img create -f raw export-file 1G
